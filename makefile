@@ -1,18 +1,7 @@
-CC = gcc
-LD = gcc
+all: prog visudrive
 
-CFLAGS = -Wall
-LDFLAGS = -lncurses -lm
+prog: prog.c
+	gcc prog.c -o prog
 
-DEPS =
-
-all: prog
-
-%.o: %.c $(DEPS)
-	$(CC) -c -o $@ $< $(CFLAGS)
-
-prog: prog.o
-	$(LD) -o prog $^ $(LDFLAGS) 
-
-e:
-	nano prog.c
+visudrive: visudrive.cc
+	g++ visudrive.cc -o visudrive -lsfml-graphics -lsfml-window -lsfml-system
