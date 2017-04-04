@@ -76,13 +76,6 @@ int main(int argc, char** argv)
 		return 1;
 	}
 
-	if(uart < 0)
-	{
-		printf("error %d opening %s: %s\n", errno, argv[1], strerror(errno));
-		return 1;
-	}
-
-
 	FILE* bin = fopen(argv[2], "rb");
 
 	if(!bin)
@@ -101,6 +94,15 @@ int main(int argc, char** argv)
 
 
 	uart = open(argv[1], O_RDWR | O_NOCTTY);
+
+	if(uart < 0)
+	{
+		printf("error %d opening %s: %s\n", errno, argv[1], strerror(errno));
+		return 1;
+	}
+
+
+
 	set_uart_attribs(uart, B115200);
 
 	printf("Entering flasher...\n");
