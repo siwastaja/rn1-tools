@@ -78,7 +78,7 @@ void draw_robot(sf::RenderWindow& win)
 	r.setFillColor(sf::Color(200,70,50));
 	r.setOrigin(10,6);
 
-	r.setRotation(cur_angle);
+	r.setRotation(cur_angle-90.0);
 	r.setPosition((cur_x+origin_x)/mm_per_pixel,(cur_y+origin_y)/mm_per_pixel);
 
 	win.draw(r);
@@ -119,7 +119,7 @@ void draw_lidar(sf::RenderWindow& win)
 
 sf::Font arial;
 
-double gyro_x, gyro_y, gyro_z, xcel_x, xcel_y, xcel_z;
+double gyro_x, gyro_y, gyro_z, xcel_x, xcel_y, xcel_z, compass_x, compass_y, compass_z;
 
 void draw_gyros(sf::RenderWindow& win)
 {
@@ -138,6 +138,13 @@ void draw_gyros(sf::RenderWindow& win)
 	t.setCharacterSize(16);
 	t.setColor(sf::Color(0,0,0));
 	t.setPosition(10,32);
+	win.draw(t);
+
+	sprintf(buf, "Compass x=%f  y=%f  z=%f", compass_x, compass_y, compass_z);
+	t.setString(buf);
+	t.setCharacterSize(16);
+	t.setColor(sf::Color(0,0,0));
+	t.setPosition(10,54);
 	win.draw(t);
 
 }
@@ -273,11 +280,26 @@ int main(int argc, char** argv)
 				xcel_z = (double)I14_I16(parsebuf[7], parsebuf[6]);
 				break;
 
+				case 0x82:
+				compass_x = (double)I14_I16(parsebuf[3], parsebuf[2]);
+				compass_y = (double)I14_I16(parsebuf[5], parsebuf[4]);
+				compass_z = (double)I14_I16(parsebuf[7], parsebuf[6]);
+
+				compass_y += 250.0;
+				compass_x -= 500.0;
+
+//				cur_angle = 360.0/(2*M_PI)*atan2(compass_x, compass_y);
+				break;
+
 				case 0x84:
 				for(int i = 0; i < 360; i++)
 				{
 					lidar_scan[360-i] = parsebuf[2+2*i+1]<<7 | parsebuf[2+2*i];
 				}
+				break;
+
+				case 0xa0:
+				cur_angle = (double)(I14_I16(parsebuf[3], parsebuf[2])>>2);
 				break;
 
 				default:
