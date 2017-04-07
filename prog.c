@@ -107,9 +107,12 @@ int main(int argc, char** argv)
 
 	printf("Entering flasher...\n");
 
-	buf[0] = '9';
-	write(uart, buf, 1);
-	sleep(1);
+	buf[0] = '6';
+	buf[1] = '7';
+	buf[2] = '8';
+	buf[3] = '9';
+	write(uart, buf, 4);
+	usleep(500000);
 	tcflush(uart, TCIFLUSH);
 
 	int cur_s;
@@ -165,7 +168,7 @@ int main(int argc, char** argv)
 		goto FAIL;
 	}
 
-	usleep(100000);
+	usleep(500000);
 
 	rxbuf[0] = 2;
 	read(uart, rxbuf, 1);
@@ -231,7 +234,7 @@ int main(int argc, char** argv)
 	buf[0] = 150;
 	write(uart, buf, 1);
 
-	usleep(100000);
+	usleep(500000);
 
 FAIL:
 	close(uart);
