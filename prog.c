@@ -105,13 +105,17 @@ int main(int argc, char** argv)
 
 	set_uart_attribs(uart, B115200);
 
+	usleep(500000);
+	tcflush(uart, TCOFLUSH);
+
 	printf("Entering flasher...\n");
 
-	buf[0] = '6';
-	buf[1] = '7';
-	buf[2] = '8';
-	buf[3] = '9';
-	write(uart, buf, 4);
+	buf[0] = 0xfe;
+	buf[1] = 0x42;
+	buf[2] = 0x11;
+	buf[3] = 0x7a;
+	buf[4] = 0x52;
+	write(uart, buf, 5);
 	usleep(500000);
 	tcflush(uart, TCIFLUSH);
 
@@ -229,9 +233,9 @@ int main(int argc, char** argv)
 		}
 	}
 
-	printf("Hard-resetting...\n");
+	printf("Soft-resetting...\n");
 
-	buf[0] = 150;
+	buf[0] = 151;
 	write(uart, buf, 1);
 
 	usleep(500000);
