@@ -70,9 +70,11 @@ int main(int argc, char** argv)
 	uint8_t buf[16];
 	uint8_t rxbuf[16];
 
-	if(argc != 3)
+	if(argc != 4)
 	{
-		printf("Usage: prog /dev/ttyUSB0 main.bin\n");
+		printf("Usage: prog <serial dev> <bin file> <reset type>\n");
+		printf("Reset type: h = hard (power cycle), s = soft (CPU soft reset)\n");
+		printf("e.g. /dev/ttyUSB0 main.bin h\n");
 		return 1;
 	}
 
@@ -83,6 +85,9 @@ int main(int argc, char** argv)
 		printf("Error opening %s.\n", argv[2]);
 		return 1;
 	}
+
+	int hard_reset = 0;
+	if(argv[3][0] == 'h') hard_reset = 1;
 
 	int size = fread(file, 1, 640*1024, bin);
 
@@ -105,7 +110,7 @@ int main(int argc, char** argv)
 
 	set_uart_attribs(uart, B115200);
 
-	usleep(500000);
+	usleep(200000);
 	tcflush(uart, TCOFLUSH);
 
 	printf("Entering flasher...\n");
@@ -116,7 +121,7 @@ int main(int argc, char** argv)
 	buf[3] = 0x7a;
 	buf[4] = 0x52;
 	write(uart, buf, 5);
-	usleep(500000);
+	usleep(200000);
 	tcflush(uart, TCIFLUSH);
 
 	int cur_s;
@@ -172,7 +177,7 @@ int main(int argc, char** argv)
 		goto FAIL;
 	}
 
-	usleep(500000);
+	usleep(200000);
 
 	rxbuf[0] = 2;
 	read(uart, rxbuf, 1);
@@ -233,12 +238,19 @@ int main(int argc, char** argv)
 		}
 	}
 
-	printf("Soft-resetting...\n");
-
-	buf[0] = 151;
+	if(hard_reset)
+	{
+		printf("Hard-resetting...\n");
+		buf[0] = 150;
+	}
+	else
+	{
+		printf("Soft-resetting...\n");
+		buf[0] = 151;
+	}
 	write(uart, buf, 1);
 
-	usleep(500000);
+	usleep(200000);
 
 FAIL:
 	close(uart);
