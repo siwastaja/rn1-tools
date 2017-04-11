@@ -120,7 +120,12 @@ int main(int argc, char** argv)
 	buf[2] = 0x11;
 	buf[3] = 0x7a;
 	buf[4] = 0x52;
-	write(uart, buf, 5);
+	buf[5] = 0xff;
+	if(write(uart, buf, 6) != 6)
+	{
+		printf("UART write fail (entering flasher)\n");
+		goto FAIL;
+	}
 	usleep(200000);
 	tcflush(uart, TCIFLUSH);
 
