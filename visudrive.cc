@@ -31,6 +31,8 @@ double cur_angle = 5.0;
 
 const double lidar_line_thick = 2.0;
 
+int speed = 0;
+
 
 int set_uart_attribs(int fd, int speed)
 {
@@ -137,14 +139,22 @@ void draw_gyros(sf::RenderWindow& win)
 	t.setString(buf);
 	t.setCharacterSize(16);
 	t.setColor(sf::Color(0,0,0));
-	t.setPosition(10,32);
+	t.setPosition(10,10+22);
 	win.draw(t);
 
 	sprintf(buf, "Compass x=%f  y=%f  z=%f", compass_x, compass_y, compass_z);
 	t.setString(buf);
 	t.setCharacterSize(16);
 	t.setColor(sf::Color(0,0,0));
-	t.setPosition(10,54);
+	t.setPosition(10,10+2*22);
+	win.draw(t);
+
+
+	sprintf(buf, "Speed = %d", speed);
+	t.setString(buf);
+	t.setCharacterSize(16);
+	t.setColor(sf::Color(0,0,0));
+	t.setPosition(10,10+3*22);
 	win.draw(t);
 
 }
@@ -153,6 +163,7 @@ int main(int argc, char** argv)
 {
 	uint8_t rxbuf[1024];
 	uint8_t parsebuf[1024];
+	uint8_t txbuf[128];
 	int do_parse = 0;
 	int rxloc = 0;
 
@@ -202,6 +213,7 @@ int main(int argc, char** argv)
 
 	tcflush(uart, TCIFLUSH);
 
+	int cnt = 0;
 	while(win.isOpen())
 	{
 		sf::Event event;
@@ -236,11 +248,15 @@ int main(int argc, char** argv)
 		{
 			cur_x += cos(M_PI*cur_angle/180.0);
 			cur_y += sin(M_PI*cur_angle/180.0);
+			speed += 1;
+			if(speed > 50) speed = 50;
 		}
 		if(sf::Keyboard::isKeyPressed(sf::Keyboard::Down))
 		{
 			cur_x -= cos(M_PI*cur_angle/180.0);
 			cur_y -= sin(M_PI*cur_angle/180.0);
+			speed -= 1;
+			if(speed < -50) speed = -50;
 		}
 
 		win.clear(sf::Color(180,220,255));
@@ -308,12 +324,35 @@ int main(int argc, char** argv)
 			do_parse = 0;
 		}
 
+
+		cnt++;
+
+		if(cnt >= 2)
+		{
+			cnt = 0;
+			if(speed > 0) speed--;
+			else if(speed < 0) speed++;
+		}
+
+		txbuf[0] = 0x80;
+		txbuf[1] = ( (uint8_t)(speed<<1) ) >> 1;
+		txbuf[2] = 0;
+		txbuf[3] = 0xff;
+
+		if(write(uart, txbuf, 4) != 4)
+		{
+			printf("write error\n");
+		}
+
 		draw_gyros(win);
 
 		draw_robot(win);
 		draw_lidar(win);
 
 		win.display();
+
+		usleep(1000);
+
 	}
 	return 0;
 }
