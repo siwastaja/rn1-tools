@@ -316,7 +316,15 @@ int main(int argc, char** argv)
 				break;
 
 				case 0xa0:
-				cur_angle = (double)(I14_I16(parsebuf[3], parsebuf[2])>>2);
+				{
+					double new_angle = (double)(I14_I16(parsebuf[3], parsebuf[2])>>2);
+					if(fabs(gyro_z) > 500.0)
+						cur_angle = (new_angle + 1.0*cur_angle)/2.0;
+					else if(fabs(gyro_z) > 250.0)
+						cur_angle = (new_angle + 3.0*cur_angle)/4.0;
+					else
+						cur_angle = (new_angle + 10.0*cur_angle)/11.0;
+				}
 				break;
 
 				default:
