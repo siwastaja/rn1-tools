@@ -32,6 +32,7 @@ double cur_angle = 5.0;
 const double lidar_line_thick = 2.0;
 
 int speed = 0;
+int angle_cmd = 0;
 
 
 int set_uart_attribs(int fd, int speed)
@@ -223,6 +224,7 @@ int main(int argc, char** argv)
 				win.close();
 		}
 
+		angle_cmd = 0;
 		if(sf::Keyboard::isKeyPressed(sf::Keyboard::PageUp))
 		{
 			mm_per_pixel *= 1.1;
@@ -238,23 +240,25 @@ int main(int argc, char** argv)
 
 		if(sf::Keyboard::isKeyPressed(sf::Keyboard::Left))
 		{
-			cur_angle -= 1.0;
+//			cur_angle -= 1.0;
+			angle_cmd = -10;
 		}
 		if(sf::Keyboard::isKeyPressed(sf::Keyboard::Right))
 		{
-			cur_angle += 1.0;
+//			cur_angle += 1.0;
+			angle_cmd = 10;
 		}
 		if(sf::Keyboard::isKeyPressed(sf::Keyboard::Up))
 		{
-			cur_x += cos(M_PI*cur_angle/180.0);
-			cur_y += sin(M_PI*cur_angle/180.0);
+//			cur_x += cos(M_PI*cur_angle/180.0);
+//			cur_y += sin(M_PI*cur_angle/180.0);
 			speed += 1;
 			if(speed > 50) speed = 50;
 		}
 		if(sf::Keyboard::isKeyPressed(sf::Keyboard::Down))
 		{
-			cur_x -= cos(M_PI*cur_angle/180.0);
-			cur_y -= sin(M_PI*cur_angle/180.0);
+//			cur_x -= cos(M_PI*cur_angle/180.0);
+//			cur_y -= sin(M_PI*cur_angle/180.0);
 			speed -= 1;
 			if(speed < -50) speed = -50;
 		}
@@ -284,13 +288,13 @@ int main(int argc, char** argv)
 		{
 			switch(parsebuf[0])
 			{
-				case 128:
+				case 0x80:
 				gyro_x = (double)I14_I16(parsebuf[3], parsebuf[2]);
 				gyro_y = (double)I14_I16(parsebuf[5], parsebuf[4]);
 				gyro_z = (double)I14_I16(parsebuf[7], parsebuf[6]);
 				break;
 
-				case 129:
+				case 0x81:
 				xcel_x = (double)I14_I16(parsebuf[3], parsebuf[2]);
 				xcel_y = (double)I14_I16(parsebuf[5], parsebuf[4]);
 				xcel_z = (double)I14_I16(parsebuf[7], parsebuf[6]);
@@ -300,9 +304,6 @@ int main(int argc, char** argv)
 				compass_x = (double)I14_I16(parsebuf[3], parsebuf[2]);
 				compass_y = (double)I14_I16(parsebuf[5], parsebuf[4]);
 				compass_z = (double)I14_I16(parsebuf[7], parsebuf[6]);
-
-				compass_y += 250.0;
-				compass_x -= 500.0;
 
 //				cur_angle = 360.0/(2*M_PI)*atan2(compass_x, compass_y);
 				break;
@@ -336,7 +337,7 @@ int main(int argc, char** argv)
 
 		txbuf[0] = 0x80;
 		txbuf[1] = ( (uint8_t)(speed<<1) ) >> 1;
-		txbuf[2] = 0;
+		txbuf[2] = ( (uint8_t)(angle_cmd<<1) ) >> 1;
 		txbuf[3] = 0xff;
 
 		if(write(uart, txbuf, 4) != 4)
@@ -351,7 +352,7 @@ int main(int argc, char** argv)
 
 		win.display();
 
-		usleep(1000);
+		usleep(100);
 
 	}
 	return 0;
