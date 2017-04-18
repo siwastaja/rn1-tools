@@ -1,4 +1,7 @@
-all: prog visudrive ros_publisher
+all: prog mcprog visudrive #ros_publisher
+
+mcprog: mcprog.c
+	gcc mcprog.c -o mcprog
 
 prog: prog.c
 	gcc prog.c -o prog

@@ -27,12 +27,15 @@ double origin_y = ((double)screen_y/2.0)*mm_per_pixel;
 
 double cur_x = 0.0;
 double cur_y = 0.0;
-double cur_angle = 5.0;
+double cur_angle = 0.0;
+double north_corr = -100.0;
 
 const double lidar_line_thick = 2.0;
 
 int speed = 0;
 int angle_cmd = 0;
+
+double int_x, int_y;
 
 
 int set_uart_attribs(int fd, int speed)
@@ -81,7 +84,7 @@ void draw_robot(sf::RenderWindow& win)
 	r.setFillColor(sf::Color(200,70,50));
 	r.setOrigin(10,6);
 
-	r.setRotation(cur_angle-90.0);
+	r.setRotation(cur_angle-north_corr);
 	r.setPosition((cur_x+origin_x)/mm_per_pixel,(cur_y+origin_y)/mm_per_pixel);
 
 	win.draw(r);
@@ -103,13 +106,13 @@ void draw_lidar(sf::RenderWindow& win)
 		if(first == 0) first = second;
 		else if(second == 0) second = first;
 
-		if(abs(first-second) > 500)
+		if(abs(first-second) > 300)
 			continue;
 
-		double x1 = (cur_x+origin_x+cos(M_PI*(cur_angle+(double)i)/180.0) * first)/mm_per_pixel;
-		double y1 = (cur_y+origin_y+sin(M_PI*(cur_angle+(double)i)/180.0) * first)/mm_per_pixel;
-		double x2 = (cur_x+origin_x+cos(M_PI*(cur_angle+(double)ip)/180.0) * second)/mm_per_pixel;
-		double y2 = (cur_y+origin_y+sin(M_PI*(cur_angle+(double)ip)/180.0) * second)/mm_per_pixel;
+		double x1 = (cur_x+origin_x+cos(M_PI*(cur_angle-north_corr+(double)i)/180.0) * first)/mm_per_pixel;
+		double y1 = (cur_y+origin_y+sin(M_PI*(cur_angle-north_corr+(double)i)/180.0) * first)/mm_per_pixel;
+		double x2 = (cur_x+origin_x+cos(M_PI*(cur_angle-north_corr+(double)ip)/180.0) * second)/mm_per_pixel;
+		double y2 = (cur_y+origin_y+sin(M_PI*(cur_angle-north_corr+(double)ip)/180.0) * second)/mm_per_pixel;
 		sf::RectangleShape rect(sf::Vector2f( sqrt(pow(x2-x1,2)+pow(y2-y1,2)), lidar_line_thick));
 		rect.setOrigin(0, lidar_line_thick/2.0);
 		rect.setPosition(x1, y1);
@@ -151,11 +154,26 @@ void draw_gyros(sf::RenderWindow& win)
 	win.draw(t);
 
 
-	sprintf(buf, "Speed = %d", speed);
+	sprintf(buf, "speed_cmd = %d  angle_cmd = %d", speed, angle_cmd);
 	t.setString(buf);
 	t.setCharacterSize(16);
 	t.setColor(sf::Color(0,0,0));
 	t.setPosition(10,10+3*22);
+	win.draw(t);
+
+
+	sprintf(buf, "angle = %.0f, north_corr = %.0f", cur_angle, north_corr);
+	t.setString(buf);
+	t.setCharacterSize(16);
+	t.setColor(sf::Color(0,0,0));
+	t.setPosition(10,10+4*22);
+	win.draw(t);
+
+	sprintf(buf, "X = %.0f, Y = %.0f", int_x, int_y);
+	t.setString(buf);
+	t.setCharacterSize(16);
+	t.setColor(sf::Color(0,0,0));
+	t.setPosition(10,10+5*22);
 	win.draw(t);
 
 }
@@ -215,6 +233,7 @@ int main(int argc, char** argv)
 	tcflush(uart, TCIFLUSH);
 
 	int cnt = 0;
+	int cnt2 = 0;
 	while(win.isOpen())
 	{
 		sf::Event event;
@@ -224,7 +243,6 @@ int main(int argc, char** argv)
 				win.close();
 		}
 
-		angle_cmd = 0;
 		if(sf::Keyboard::isKeyPressed(sf::Keyboard::PageUp))
 		{
 			mm_per_pixel *= 1.1;
@@ -238,29 +256,68 @@ int main(int argc, char** argv)
 			origin_y = ((double)screen_y/2.0)*mm_per_pixel;
 		}
 
-		if(sf::Keyboard::isKeyPressed(sf::Keyboard::Left))
+		if(sf::Keyboard::isKeyPressed(sf::Keyboard::A))
 		{
-//			cur_angle -= 1.0;
-			angle_cmd = -10;
+			angle_cmd += 1;
+			if(angle_cmd > 3)
+				angle_cmd = 3;
 		}
-		if(sf::Keyboard::isKeyPressed(sf::Keyboard::Right))
+		else if(sf::Keyboard::isKeyPressed(sf::Keyboard::Left))
 		{
-//			cur_angle += 1.0;
-			angle_cmd = 10;
+			angle_cmd += 2;
+			if(angle_cmd > 15)
+				angle_cmd = 15;
+		}
+		else
+		{
+			if(angle_cmd > 0) angle_cmd--;
+		}
+		if(sf::Keyboard::isKeyPressed(sf::Keyboard::D))
+		{
+			angle_cmd -= 1;
+			if(angle_cmd < -3)
+				angle_cmd = -3;
+		}
+		else if(sf::Keyboard::isKeyPressed(sf::Keyboard::Right))
+		{
+			angle_cmd -= 2;
+			if(angle_cmd < -15)
+				angle_cmd = -15;
+		}
+		else
+		{
+			if(angle_cmd < 0) angle_cmd++;
 		}
 		if(sf::Keyboard::isKeyPressed(sf::Keyboard::Up))
 		{
-//			cur_x += cos(M_PI*cur_angle/180.0);
-//			cur_y += sin(M_PI*cur_angle/180.0);
-			speed += 1;
-			if(speed > 50) speed = 50;
+			speed += 2;
+			if(sf::Keyboard::isKeyPressed(sf::Keyboard::O))
+				if(speed > 63) speed = 63;
+			else 
+				if(speed > 40) speed = 40;
 		}
 		if(sf::Keyboard::isKeyPressed(sf::Keyboard::Down))
 		{
-//			cur_x -= cos(M_PI*cur_angle/180.0);
-//			cur_y -= sin(M_PI*cur_angle/180.0);
-			speed -= 1;
-			if(speed < -50) speed = -50;
+			speed -= 2;
+			if(speed < -40) speed = -40;
+		}
+		if(sf::Keyboard::isKeyPressed(sf::Keyboard::W))
+		{
+			speed += 2;
+			if(speed > 15) speed = 15;
+		}
+		if(sf::Keyboard::isKeyPressed(sf::Keyboard::S))
+		{
+			speed -= 2;
+			if(speed < -15) speed = -15;
+		}
+		if(sf::Keyboard::isKeyPressed(sf::Keyboard::F1))
+		{
+			north_corr-=1.0;
+		}
+		if(sf::Keyboard::isKeyPressed(sf::Keyboard::F2))
+		{
+			north_corr+=1.0;
 		}
 
 		win.clear(sf::Color(180,220,255));
@@ -327,6 +384,14 @@ int main(int argc, char** argv)
 				}
 				break;
 
+				case 0xa1:
+				{
+					int_x = (double)(I14_I16(parsebuf[3], parsebuf[2])>>2);
+					int_y = (double)(I14_I16(parsebuf[5], parsebuf[4])>>2);
+				}
+				break;
+
+
 				default:
 				break;
 			}
@@ -336,12 +401,13 @@ int main(int argc, char** argv)
 
 		cnt++;
 
-		if(cnt >= 2)
-		{
-			cnt = 0;
+//		if(cnt >= 2)
+//		{
+//			cnt = 0;
 			if(speed > 0) speed--;
 			else if(speed < 0) speed++;
-		}
+//		}
+
 
 		txbuf[0] = 0x80;
 		txbuf[1] = ( (uint8_t)(speed<<1) ) >> 1;
