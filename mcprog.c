@@ -126,7 +126,7 @@ int main(int argc, char** argv)
 		printf("UART write fail (entering flasher)\n");
 		goto FAIL;
 	}
-	usleep(200000);
+	usleep(500000);
 	tcflush(uart, TCIFLUSH);
 
 	int pages = size/PAGE_LEN + 1;
@@ -151,8 +151,8 @@ int main(int argc, char** argv)
 
 	printf("Writing %u bytes...\n", size);
 	buf[0] = 101;
-	buf[1] = (addr&0xff00)>>8;
-	buf[2] = (addr&0xff);
+	buf[1] = (size&0xff00)>>8;
+	buf[2] = (size&0xff);
 
 	if(write(uart, buf, 3) != 3)
 	{
