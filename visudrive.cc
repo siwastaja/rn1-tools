@@ -37,6 +37,7 @@ int angle_cmd = 0;
 
 double int_x, int_y;
 
+int d1;
 
 int set_uart_attribs(int fd, int speed)
 {
@@ -174,6 +175,13 @@ void draw_gyros(sf::RenderWindow& win)
 	t.setCharacterSize(16);
 	t.setColor(sf::Color(0,0,0));
 	t.setPosition(10,10+5*22);
+	win.draw(t);
+
+	sprintf(buf, "d1 = %d", d1);
+	t.setString(buf);
+	t.setCharacterSize(16);
+	t.setColor(sf::Color(0,0,0));
+	t.setPosition(10,10+6*22);
 	win.draw(t);
 
 }
@@ -391,6 +399,11 @@ int main(int argc, char** argv)
 				}
 				break;
 
+				case 0xd1:
+				{
+					d1 = parsebuf[1];
+				}
+				break;
 
 				default:
 				break;
@@ -408,7 +421,7 @@ int main(int argc, char** argv)
 			else if(speed < 0) speed++;
 //		}
 
-
+/*
 		txbuf[0] = 0x80;
 		txbuf[1] = ( (uint8_t)(speed<<1) ) >> 1;
 		txbuf[2] = ( (uint8_t)(angle_cmd<<1) ) >> 1;
@@ -418,7 +431,7 @@ int main(int argc, char** argv)
 		{
 			printf("write error\n");
 		}
-
+*/
 		draw_gyros(win);
 
 		draw_robot(win);
