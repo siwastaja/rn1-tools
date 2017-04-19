@@ -327,6 +327,26 @@ int main(int argc, char** argv)
 		{
 			north_corr+=1.0;
 		}
+		if(sf::Keyboard::isKeyPressed(sf::Keyboard::F3))
+		{
+			txbuf[0] = 0xd1;
+			txbuf[1] = 0xff;
+
+			if(write(uart, txbuf, 2) != 2)
+			{
+				printf("write error\n");
+			}
+		}
+		if(sf::Keyboard::isKeyPressed(sf::Keyboard::F4))
+		{
+			txbuf[0] = 0xd2;
+			txbuf[1] = 0xff;
+
+			if(write(uart, txbuf, 2) != 2)
+			{
+				printf("write error\n");
+			}
+		}
 
 		win.clear(sf::Color(180,220,255));
 
@@ -401,7 +421,7 @@ int main(int argc, char** argv)
 
 				case 0xd1:
 				{
-					d1 = parsebuf[1];
+					d1 = (((int)parsebuf[1])<<9) | (((int)parsebuf[2])<<2);
 				}
 				break;
 
