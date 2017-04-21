@@ -15,7 +15,13 @@
 #define M_PI 3.14159265358
 #endif
 
-#define I14_I16(msb,lsb) ((int16_t)( ( ((uint16_t)(msb)<<9) | ((uint16_t)(lsb)<<2) ) ))
+#include "../rn1-brain/comm.h"
+
+#define I14x2_I16(msb,lsb) ((int16_t)( ( ((uint16_t)(msb)<<9) | ((uint16_t)(lsb)<<2) ) ))
+
+sf::Font arial;
+
+int manual_control = 1;
 
 double mm_per_pixel = 10.0;
 
@@ -38,6 +44,11 @@ int angle_cmd = 0;
 double int_x, int_y;
 
 int d1;
+
+int32_t dbg1, dbg2, dbg3, dbg4;
+
+int auto_angle = 0;
+int auto_fwd = 0;
 
 int set_uart_attribs(int fd, int speed)
 {
@@ -89,6 +100,20 @@ void draw_robot(sf::RenderWindow& win)
 	r.setPosition((cur_x+origin_x)/mm_per_pixel,(cur_y+origin_y)/mm_per_pixel);
 
 	win.draw(r);
+
+	if(!manual_control)
+	{
+		sf::Text t;
+		t.setFont(arial);
+		char buf[128];
+		sprintf(buf, "%d", auto_angle);
+		t.setString(buf);
+		t.setCharacterSize(14);
+		t.setColor(sf::Color(0,0,0));
+		t.setPosition((cur_x+origin_x)/mm_per_pixel,((cur_y+origin_y)/mm_per_pixel)+20.0);
+		win.draw(t);
+	}
+
 }
 
 int lidar_scan[360];
@@ -124,11 +149,9 @@ void draw_lidar(sf::RenderWindow& win)
 	}
 }
 
-sf::Font arial;
-
 double gyro_x, gyro_y, gyro_z, xcel_x, xcel_y, xcel_z, compass_x, compass_y, compass_z;
 
-void draw_gyros(sf::RenderWindow& win)
+void draw_texts(sf::RenderWindow& win)
 {
 	sf::Text t;
 	t.setFont(arial);
@@ -184,10 +207,35 @@ void draw_gyros(sf::RenderWindow& win)
 	t.setPosition(10,10+6*22);
 	win.draw(t);
 
+	sprintf(buf, "dbg1 = %d  dbg2 = %d  dbg3 = %d  dbg4 = %d", dbg1, dbg2, dbg3, dbg4);
+	t.setString(buf);
+	t.setCharacterSize(14);
+	t.setColor(sf::Color(0,0,0));
+	t.setPosition(10,10+7*22);
+	win.draw(t);
+
+	if(manual_control)
+	{
+		sprintf(buf, "MANUAL CONTROL");
+		t.setCharacterSize(20);
+		t.setColor(sf::Color(220,40,20));
+	}
+	else
+	{
+		sprintf(buf, "AUTO CONTROL");
+		t.setCharacterSize(22);
+		t.setColor(sf::Color(40,220,20));
+	}
+	t.setString(buf);
+	t.setPosition(screen_x-200,10);
+	win.draw(t);
+
+
 }
 
 int main(int argc, char** argv)
 {
+	int return_pressed = 0;
 	uint8_t rxbuf[1024];
 	uint8_t parsebuf[1024];
 	uint8_t txbuf[128];
@@ -197,6 +245,7 @@ int main(int argc, char** argv)
 	if(argc != 2)
 	{
 		printf("Usage: visudrive /dev/ttyUSB0\n");
+		printf("   or: visudrive 12.34.56.78 12345\n");
 		return 1;
 	}
 
@@ -264,61 +313,112 @@ int main(int argc, char** argv)
 			origin_y = ((double)screen_y/2.0)*mm_per_pixel;
 		}
 
-		if(sf::Keyboard::isKeyPressed(sf::Keyboard::A))
+
+
+		if(manual_control)
 		{
-			angle_cmd += 1;
-			if(angle_cmd > 3)
-				angle_cmd = 3;
+			if(sf::Keyboard::isKeyPressed(sf::Keyboard::A))
+			{
+				angle_cmd += 1;
+				if(angle_cmd > 3)
+					angle_cmd = 3;
+			}
+			else if(sf::Keyboard::isKeyPressed(sf::Keyboard::Left))
+			{
+				angle_cmd += 2;
+				if(angle_cmd > 15)
+					angle_cmd = 15;
+			}
+			else
+			{
+				if(angle_cmd > 0) angle_cmd--;
+			}
+			if(sf::Keyboard::isKeyPressed(sf::Keyboard::D))
+			{
+				angle_cmd -= 1;
+				if(angle_cmd < -3)
+					angle_cmd = -3;
+			}
+			else if(sf::Keyboard::isKeyPressed(sf::Keyboard::Right))
+			{
+				angle_cmd -= 2;
+				if(angle_cmd < -15)
+					angle_cmd = -15;
+			}
+			else
+			{
+				if(angle_cmd < 0) angle_cmd++;
+			}
+			if(sf::Keyboard::isKeyPressed(sf::Keyboard::Up))
+			{
+				speed += 2;
+				if(sf::Keyboard::isKeyPressed(sf::Keyboard::LShift))
+				{ if(speed > 63) speed = 63; } else { if(speed > 40) speed = 40; }
+			}
+			if(sf::Keyboard::isKeyPressed(sf::Keyboard::Down))
+			{
+				speed -= 2;
+				if(speed < -40) speed = -40;
+			}
+			if(sf::Keyboard::isKeyPressed(sf::Keyboard::W))
+			{
+				speed += 2;
+				if(speed > 15) speed = 15;
+			}
+			if(sf::Keyboard::isKeyPressed(sf::Keyboard::S))
+			{
+				speed -= 2;
+				if(speed < -15) speed = -15;
+			}
 		}
-		else if(sf::Keyboard::isKeyPressed(sf::Keyboard::Left))
+		else // automatic control
 		{
-			angle_cmd += 2;
-			if(angle_cmd > 15)
-				angle_cmd = 15;
+			if(sf::Keyboard::isKeyPressed(sf::Keyboard::RShift))
+			{
+				int tt = 0;
+				if(auto_angle<0) { auto_angle *= -1; tt=1;}
+				int t = auto_angle%45;
+
+				if(t < 22) auto_angle -= t;
+				else auto_angle += 45-t;
+				if(tt) auto_angle *= -1;
+			}
+
+			if(sf::Keyboard::isKeyPressed(sf::Keyboard::Left))
+			{
+				auto_angle--;
+			}
+			if(sf::Keyboard::isKeyPressed(sf::Keyboard::Right))
+			{
+				auto_angle++;
+			}
+			if(sf::Keyboard::isKeyPressed(sf::Keyboard::Return))
+			{
+				if(!return_pressed)
+				{
+					return_pressed = 1;
+					txbuf[0] = 0x81;
+					txbuf[1] = I16_MS(auto_angle*16);
+					txbuf[2] = I16_LS(auto_angle*16);
+					txbuf[3] = 0;
+					txbuf[4] = 0;
+					txbuf[5] = 0xff;
+
+					if(write(uart, txbuf, 6) != 6)
+					{
+						printf("write error\n");
+					}
+
+				}
+			}
+			else
+			{
+				return_pressed = 0;
+			}
 		}
-		else
-		{
-			if(angle_cmd > 0) angle_cmd--;
-		}
-		if(sf::Keyboard::isKeyPressed(sf::Keyboard::D))
-		{
-			angle_cmd -= 1;
-			if(angle_cmd < -3)
-				angle_cmd = -3;
-		}
-		else if(sf::Keyboard::isKeyPressed(sf::Keyboard::Right))
-		{
-			angle_cmd -= 2;
-			if(angle_cmd < -15)
-				angle_cmd = -15;
-		}
-		else
-		{
-			if(angle_cmd < 0) angle_cmd++;
-		}
-		if(sf::Keyboard::isKeyPressed(sf::Keyboard::Up))
-		{
-			speed += 2;
-			if(sf::Keyboard::isKeyPressed(sf::Keyboard::O))
-				if(speed > 63) speed = 63;
-			else 
-				if(speed > 40) speed = 40;
-		}
-		if(sf::Keyboard::isKeyPressed(sf::Keyboard::Down))
-		{
-			speed -= 2;
-			if(speed < -40) speed = -40;
-		}
-		if(sf::Keyboard::isKeyPressed(sf::Keyboard::W))
-		{
-			speed += 2;
-			if(speed > 15) speed = 15;
-		}
-		if(sf::Keyboard::isKeyPressed(sf::Keyboard::S))
-		{
-			speed -= 2;
-			if(speed < -15) speed = -15;
-		}
+
+
+
 		if(sf::Keyboard::isKeyPressed(sf::Keyboard::F1))
 		{
 			north_corr-=1.0;
@@ -330,9 +430,10 @@ int main(int argc, char** argv)
 		if(sf::Keyboard::isKeyPressed(sf::Keyboard::F3))
 		{
 			txbuf[0] = 0xd1;
-			txbuf[1] = 0xff;
+			txbuf[1] = 0x01;
+			txbuf[2] = 0xff;
 
-			if(write(uart, txbuf, 2) != 2)
+			if(write(uart, txbuf, 3) != 3)
 			{
 				printf("write error\n");
 			}
@@ -340,13 +441,23 @@ int main(int argc, char** argv)
 		if(sf::Keyboard::isKeyPressed(sf::Keyboard::F4))
 		{
 			txbuf[0] = 0xd2;
-			txbuf[1] = 0xff;
+			txbuf[1] = 0x01;
+			txbuf[2] = 0xff;
 
-			if(write(uart, txbuf, 2) != 2)
+			if(write(uart, txbuf, 3) != 3)
 			{
 				printf("write error\n");
 			}
 		}
+		if(sf::Keyboard::isKeyPressed(sf::Keyboard::F11))
+		{
+			manual_control = 1;
+		}
+		if(sf::Keyboard::isKeyPressed(sf::Keyboard::F12))
+		{
+			manual_control = 0;
+		}
+
 
 		win.clear(sf::Color(180,220,255));
 
@@ -374,21 +485,21 @@ int main(int argc, char** argv)
 			switch(parsebuf[0])
 			{
 				case 0x80:
-				gyro_x = (double)I14_I16(parsebuf[3], parsebuf[2]);
-				gyro_y = (double)I14_I16(parsebuf[5], parsebuf[4]);
-				gyro_z = (double)I14_I16(parsebuf[7], parsebuf[6]);
+				gyro_x = (double)I14x2_I16(parsebuf[3], parsebuf[2]);
+				gyro_y = (double)I14x2_I16(parsebuf[5], parsebuf[4]);
+				gyro_z = (double)I14x2_I16(parsebuf[7], parsebuf[6]);
 				break;
 
 				case 0x81:
-				xcel_x = (double)I14_I16(parsebuf[3], parsebuf[2]);
-				xcel_y = (double)I14_I16(parsebuf[5], parsebuf[4]);
-				xcel_z = (double)I14_I16(parsebuf[7], parsebuf[6]);
+				xcel_x = (double)I14x2_I16(parsebuf[3], parsebuf[2]);
+				xcel_y = (double)I14x2_I16(parsebuf[5], parsebuf[4]);
+				xcel_z = (double)I14x2_I16(parsebuf[7], parsebuf[6]);
 				break;
 
 				case 0x82:
-				compass_x = (double)I14_I16(parsebuf[3], parsebuf[2]);
-				compass_y = (double)I14_I16(parsebuf[5], parsebuf[4]);
-				compass_z = (double)I14_I16(parsebuf[7], parsebuf[6]);
+				compass_x = (double)I14x2_I16(parsebuf[3], parsebuf[2]);
+				compass_y = (double)I14x2_I16(parsebuf[5], parsebuf[4]);
+				compass_z = (double)I14x2_I16(parsebuf[7], parsebuf[6]);
 
 //				cur_angle = 360.0/(2*M_PI)*atan2(compass_x, compass_y);
 				break;
@@ -402,7 +513,7 @@ int main(int argc, char** argv)
 
 				case 0xa0:
 				{
-					double new_angle = (double)(I14_I16(parsebuf[3], parsebuf[2])>>2);
+					double new_angle = (double)(I14x2_I16(parsebuf[3], parsebuf[2])>>2);
 					if(fabs(gyro_z) > 500.0)
 						cur_angle = (new_angle + 1.0*cur_angle)/2.0;
 					else if(fabs(gyro_z) > 250.0)
@@ -414,14 +525,23 @@ int main(int argc, char** argv)
 
 				case 0xa1:
 				{
-					int_x = (double)(I14_I16(parsebuf[3], parsebuf[2])>>2);
-					int_y = (double)(I14_I16(parsebuf[5], parsebuf[4])>>2);
+					int_x = (double)(I14x2_I16(parsebuf[3], parsebuf[2])>>2);
+					int_y = (double)(I14x2_I16(parsebuf[5], parsebuf[4])>>2);
 				}
 				break;
 
 				case 0xd1:
 				{
-					d1 = (((int)parsebuf[1])<<9) | (((int)parsebuf[2])<<2);
+					d1 = (((int)parsebuf[1])<<9) | (((int)parsebuf[2])<<2)>>2;
+				}
+				break;
+
+				case 0xd2:
+				{
+					dbg1 = I7x5_I32(parsebuf[1],parsebuf[2],parsebuf[3],parsebuf[4],parsebuf[5]);
+					dbg2 = I7x5_I32(parsebuf[6],parsebuf[7],parsebuf[8],parsebuf[9],parsebuf[10]);
+					dbg3 = I7x5_I32(parsebuf[11],parsebuf[12],parsebuf[13],parsebuf[14],parsebuf[15]);
+					dbg4 = I7x5_I32(parsebuf[16],parsebuf[17],parsebuf[18],parsebuf[19],parsebuf[20]);
 				}
 				break;
 
@@ -441,18 +561,21 @@ int main(int argc, char** argv)
 			else if(speed < 0) speed++;
 //		}
 
-/*
-		txbuf[0] = 0x80;
-		txbuf[1] = ( (uint8_t)(speed<<1) ) >> 1;
-		txbuf[2] = ( (uint8_t)(angle_cmd<<1) ) >> 1;
-		txbuf[3] = 0xff;
 
-		if(write(uart, txbuf, 4) != 4)
+		if(manual_control)
 		{
-			printf("write error\n");
+			txbuf[0] = 0x80;
+			txbuf[1] = ( (uint8_t)(speed<<1) ) >> 1;
+			txbuf[2] = ( (uint8_t)(angle_cmd<<1) ) >> 1;
+			txbuf[3] = 0xff;
+
+			if(write(uart, txbuf, 4) != 4)
+			{
+				printf("write error\n");
+			}
 		}
-*/
-		draw_gyros(win);
+
+		draw_texts(win);
 
 		draw_robot(win);
 		draw_lidar(win);
