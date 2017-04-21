@@ -10,6 +10,7 @@
 #include <cmath>
 #include <cstring>
 #include <SFML/Graphics.hpp>
+#include <SFML/Network.hpp>
 
 #ifndef M_PI
 #define M_PI 3.14159265358
@@ -83,6 +84,37 @@ int set_uart_attribs(int fd, int speed)
 }
 
 int uart;
+sf::IpAddress serv_ip;
+unsigned short serv_port;
+unsigned short our_port;
+sf::UdpSocket udpsock;
+
+uint8_t internal_txbuf[129];
+uint8_t* txbuf;
+
+void snd(int len)
+{
+	if(len < 3 || len > 128)
+	{
+		printf("Illegal len\n");
+		return;
+	}
+
+	if(uart)
+	{
+		if(write(uart, txbuf, len) != len)
+		{
+			printf("uart write error\n");
+		}
+	}
+	else // udp
+	{
+		if(udpsock.send(internal_txbuf, len+1, serv_ip, serv_port) != sf::Socket::Done)
+		{
+			printf("udp send error\n");
+		}
+	}
+}
 
 void draw_robot(sf::RenderWindow& win)
 {
@@ -238,26 +270,54 @@ int main(int argc, char** argv)
 	int return_pressed = 0;
 	uint8_t rxbuf[1024];
 	uint8_t parsebuf[1024];
-	uint8_t txbuf[128];
 	int do_parse = 0;
 	int rxloc = 0;
 
-	if(argc != 2)
+	internal_txbuf[0] = 0; // Start all UDP packets with 0; others are messages meant to the udpserver only.
+	txbuf = &internal_txbuf[1];
+
+	if(argc != 2 && argc != 4)
 	{
 		printf("Usage: visudrive /dev/ttyUSB0\n");
-		printf("   or: visudrive 12.34.56.78 12345\n");
+		printf("   or: visudrive serverip serverport ourport\n");
 		return 1;
 	}
 
-	uart = open(argv[1], O_RDWR | O_NOCTTY);
+	uart = 0;
+	if(argc == 2)
+	{	
+		uart = open(argv[1], O_RDWR | O_NOCTTY);
 
-	if(uart < 0)
+		if(uart < 0)
+		{
+			printf("error %d opening %s: %s\n", errno, argv[1], strerror(errno));
+			return 1;
+		}
+
+		set_uart_attribs(uart, B115200);
+	}
+	else
 	{
-		printf("error %d opening %s: %s\n", errno, argv[1], strerror(errno));
-		return 1;
+		serv_ip = argv[1];
+		serv_port = atoi(argv[2]);
+		our_port = atoi(argv[3]);
+
+		udpsock.setBlocking(false);
+		if(udpsock.bind(our_port) != sf::Socket::Done)
+		{
+			printf("Error binding to udp socket.\n");
+			return 1;
+		}
+
+		uint8_t sub[2] = {123, 0xaa};
+		if(udpsock.send(sub, 2, serv_ip, serv_port) != sf::Socket::Done)
+		{
+			printf("Error sending subscription UDP packet.\n");
+			return 1;
+		}
+
 	}
 
-	set_uart_attribs(uart, B115200);
 
 	if (!arial.loadFromFile("arial.ttf"))
 	{
@@ -403,12 +463,7 @@ int main(int argc, char** argv)
 					txbuf[3] = 0;
 					txbuf[4] = 0;
 					txbuf[5] = 0xff;
-
-					if(write(uart, txbuf, 6) != 6)
-					{
-						printf("write error\n");
-					}
-
+					snd(6);
 				}
 			}
 			else
@@ -432,22 +487,14 @@ int main(int argc, char** argv)
 			txbuf[0] = 0xd1;
 			txbuf[1] = 0x01;
 			txbuf[2] = 0xff;
-
-			if(write(uart, txbuf, 3) != 3)
-			{
-				printf("write error\n");
-			}
+			snd(3);
 		}
 		if(sf::Keyboard::isKeyPressed(sf::Keyboard::F4))
 		{
 			txbuf[0] = 0xd2;
 			txbuf[1] = 0x01;
 			txbuf[2] = 0xff;
-
-			if(write(uart, txbuf, 3) != 3)
-			{
-				printf("write error\n");
-			}
+			snd(3);
 		}
 		if(sf::Keyboard::isKeyPressed(sf::Keyboard::F11))
 		{
@@ -462,22 +509,38 @@ int main(int argc, char** argv)
 		win.clear(sf::Color(180,220,255));
 
 		uint8_t byte;
-		while(read(uart, &byte, 1))
+
+		if(uart)
 		{
-			if(rxloc > 1000)
-				rxloc = 0;
-
-			if(byte > 127)
+			while(read(uart, &byte, 1))
 			{
-				memcpy(parsebuf, rxbuf, rxloc);
-				do_parse = 1;
-				rxbuf[0] = byte;
-				rxloc = 1;
-				break;
-			}
+				if(rxloc > 1000)
+					rxloc = 0;
 
-			rxbuf[rxloc] = byte;
-			rxloc++;
+				if(byte > 127)
+				{
+					memcpy(parsebuf, rxbuf, rxloc);
+					do_parse = 1;
+					rxbuf[0] = byte;
+					rxloc = 1;
+					break;
+				}
+
+				rxbuf[rxloc] = byte;
+				rxloc++;
+			}
+		}
+		else // UDP
+		{
+			sf::IpAddress sender;
+			unsigned short sender_port;
+			unsigned int len = rxloc;
+			if(udpsock.receive(rxbuf, 1000, len, sender, sender_port) == sf::Socket::Done)
+			{
+//				printf("RECEIVED! len=%d  data = %u  %u  %u\n", len, rxbuf[0], rxbuf[1], rxbuf[2]);
+				memcpy(parsebuf, rxbuf, len);
+				do_parse = 1;
+			}
 		}
 
 		if(do_parse)
@@ -569,10 +632,8 @@ int main(int argc, char** argv)
 			txbuf[2] = ( (uint8_t)(angle_cmd<<1) ) >> 1;
 			txbuf[3] = 0xff;
 
-			if(write(uart, txbuf, 4) != 4)
-			{
-				printf("write error\n");
-			}
+			snd(4);
+
 		}
 
 		draw_texts(win);

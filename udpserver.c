@@ -63,7 +63,7 @@ int main (int argc, char** argv)
 		return 1;
 	}
 
-	uart = open(argv[1], O_RDWR | O_NOCTTY);
+	uart = open(argv[1], O_RDWR | O_NOCTTY | O_NONBLOCK);
 
 	if(uart < 0)
 	{
@@ -84,7 +84,7 @@ int main (int argc, char** argv)
 	struct sockaddr_in si_me, si_other, si_subscriber;
 	 
 	int udpsock, i, slen = sizeof(si_other) , recv_len;
-	char buf[BUFLEN];
+	uint8_t buf[BUFLEN];
 	 
 	//create a UDP socket
 	if ((udpsock=socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)) == -1)
@@ -110,11 +110,6 @@ int main (int argc, char** argv)
 
 	fd_set fds;
 
-	/* Initialize the set of active sockets. */
-	FD_ZERO(&fds);
-	FD_SET(udpsock, &fds);
-	FD_SET(uart, &fds);
-
 	int fds_size = udpsock;
 	if(uart > fds_size) fds_size = uart;
 	fds_size+=1;
@@ -126,6 +121,9 @@ int main (int argc, char** argv)
 
 	while(1)
 	{
+		FD_ZERO(&fds);
+		FD_SET(udpsock, &fds);
+		FD_SET(uart, &fds);
 		if (select(fds_size, &fds, NULL, NULL, NULL) < 0)
 		{
 			printf("select() failed");
@@ -134,8 +132,15 @@ int main (int argc, char** argv)
 
 		if(FD_ISSET(udpsock, &fds))
 		{
+//			printf("UDP!!!\n");
 			if ((recv_len = recvfrom(udpsock, buf, BUFLEN, 0, (struct sockaddr *) &si_other, &slen)) == -1)
 			{
+				printf("recvfrom() failed");
+				return 1;
+			}
+			else
+			{
+//				printf("LEN = %d  data = %u  %u!!!\n", recv_len, buf[0], buf[1]);
 				if(recv_len >= 2 && buf[0] == 123 && buf[1] == 0xaa)
 				{
 					printf("Subscribed!\n");
@@ -143,26 +148,21 @@ int main (int argc, char** argv)
 					memcpy(&si_subscriber, &si_other, sizeof(si_other));
 					subs_addr_len = slen;
 				}
+				else
+				{
+//					printf("uart write\n");
+					if(write(uart, &buf[1], recv_len-1) != recv_len-1)
+					{
+						printf("uart write error\n");
+					}
+				}
+			}
 
-				printf("recvfrom() failed");
-				return 1;
-			}
-			 
-/*			//print details of the client/peer and the data received
-			printf("Data: %s\n" , buf);
-			 
-			//now reply the client with the same data
-			if (sendto(udpsock, buf, recv_len, 0, (struct sockaddr*) &si_other, slen) == -1)
-			{
-				printf("sendto() failed");
-				return 1;
-			}
-*/
 		}
 
 		if(FD_ISSET(uart, &fds))
 		{
-			printf("UART!!!\n");
+//			printf("UART!!!\n");
 			uint8_t byte;
 			if(read(uart, &byte, 1) < 0)
 			{

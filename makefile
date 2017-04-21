@@ -7,7 +7,7 @@ prog: prog.c
 	gcc prog.c -o prog
 
 visudrive: visudrive.cc ../rn1-brain/comm.h
-	g++ visudrive.cc -o visudrive -lsfml-graphics -lsfml-window -lsfml-system
+	g++ visudrive.cc -o visudrive -lsfml-network -lsfml-graphics -lsfml-window -lsfml-system
 
 udpserver: udpserver.c
 	gcc udpserver.c -o udpserver
