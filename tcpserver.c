@@ -6,6 +6,12 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <netdb.h>
+#include <termios.h>
+#include <string.h>
+#include <fcntl.h>
+#include <stropts.h>
+#include <sys/select.h>
+#include <sys/ioctl.h>
 
 #define MAXBUF 1024
 
@@ -69,10 +75,10 @@ int uart;
 
 int read_from_client (int filedes)
 {
-	char buffer[MAXMSG];
+	char buffer[MAXBUF];
 	int nbytes;
 
-	nbytes = read (filedes, buffer, MAXMSG);
+	nbytes = read (filedes, buffer, MAXBUF);
 	if (nbytes < 0)
 	{
 		/* Read error. */
@@ -117,7 +123,7 @@ int main (int argc, char** argv)
 	}
 
 	int port = atoi(argv[2]);
-	if(port < 1 || port > 65535)
+	if(port < 1 || port > 65535)
 	{
 		printf("Invalid port number %u\n", port);
 		return 1;
@@ -139,6 +145,7 @@ int main (int argc, char** argv)
 	FD_SET(uart, &active_fd_set);
 
 	int latest = 0;
+	int rxloc = 0;
 
 	while(1)
 	{
@@ -206,8 +213,8 @@ int main (int argc, char** argv)
 						exit (EXIT_FAILURE);
 					}
 					latest = new;
-					fprintf (stderr, "Server: connect from host %s, port %hd.\n", inet_ntoa (clientname.sin_addr),
-					        ntohs (clientname.sin_port));
+					fprintf (stderr, "Server: connect from host %u, port %hd.\n", clientname.sin_addr.s_addr,
+					        ntohs(clientname.sin_port));
 
 					FD_SET (new, &active_fd_set);
 				}
