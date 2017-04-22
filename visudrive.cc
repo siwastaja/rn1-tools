@@ -32,12 +32,18 @@ int screen_y = 768;
 double origin_x = ((double)screen_x/2.0)*mm_per_pixel;
 double origin_y = ((double)screen_y/2.0)*mm_per_pixel;
 
+double robot_xs = 480.0;
+double robot_ys = 520.0;
+double lidar_xoffs = 0.0;
+double lidar_yoffs = -120.0;
+
 double cur_x = 0.0;
 double cur_y = 0.0;
 double cur_angle = 0.0;
 double north_corr = -100.0;
 
 const double lidar_line_thick = 2.0;
+const double sonar_line_thick = 4.0;
 
 int speed = 0;
 int angle_cmd = 0;
@@ -50,6 +56,8 @@ int32_t dbg1, dbg2, dbg3, dbg4;
 
 int auto_angle = 0;
 int auto_fwd = 0;
+
+int lidar_status = 0;
 
 int set_uart_attribs(int fd, int speed)
 {
@@ -120,13 +128,13 @@ void draw_robot(sf::RenderWindow& win)
 {
 	sf::ConvexShape r(5);
 	r.setPoint(0, sf::Vector2f(0,0));
-	r.setPoint(1, sf::Vector2f(0,12));
-	r.setPoint(2, sf::Vector2f(15,12));
-	r.setPoint(3, sf::Vector2f(20,6));
-	r.setPoint(4, sf::Vector2f(15,0));
+	r.setPoint(1, sf::Vector2f(0,robot_ys/mm_per_pixel));
+	r.setPoint(2, sf::Vector2f(robot_xs/mm_per_pixel,robot_ys/mm_per_pixel));
+	r.setPoint(3, sf::Vector2f(1.3*robot_xs/mm_per_pixel,0.5*robot_ys/mm_per_pixel));
+	r.setPoint(4, sf::Vector2f(robot_xs/mm_per_pixel,0));
 
 	r.setFillColor(sf::Color(200,70,50));
-	r.setOrigin(10,6);
+	r.setOrigin(0.5*robot_xs/mm_per_pixel,0.5*robot_ys/mm_per_pixel);
 
 	r.setRotation(cur_angle-north_corr);
 	r.setPosition((cur_x+origin_x)/mm_per_pixel,(cur_y+origin_y)/mm_per_pixel);
@@ -150,6 +158,9 @@ void draw_robot(sf::RenderWindow& win)
 
 int lidar_scan[360];
 
+int sonars[3] = {1000,1000,1000};
+int sonar_angles[3] = {-6, 0, 6};
+
 void draw_lidar(sf::RenderWindow& win)
 {
 	for(int i = 0; i < 360; i++)
@@ -167,17 +178,53 @@ void draw_lidar(sf::RenderWindow& win)
 		if(abs(first-second) > 300)
 			continue;
 
-		double x1 = (cur_x+origin_x+cos(M_PI*(cur_angle-north_corr+(double)i)/180.0) * first)/mm_per_pixel;
-		double y1 = (cur_y+origin_y+sin(M_PI*(cur_angle-north_corr+(double)i)/180.0) * first)/mm_per_pixel;
-		double x2 = (cur_x+origin_x+cos(M_PI*(cur_angle-north_corr+(double)ip)/180.0) * second)/mm_per_pixel;
-		double y2 = (cur_y+origin_y+sin(M_PI*(cur_angle-north_corr+(double)ip)/180.0) * second)/mm_per_pixel;
+		double x1 = (cur_x+origin_x+lidar_xoffs+cos(M_PI*(cur_angle-north_corr+(double)i)/180.0) * first)/mm_per_pixel;
+		double y1 = (cur_y+origin_y+lidar_yoffs+sin(M_PI*(cur_angle-north_corr+(double)i)/180.0) * first)/mm_per_pixel;
+		double x2 = (cur_x+origin_x+lidar_xoffs+cos(M_PI*(cur_angle-north_corr+(double)ip)/180.0) * second)/mm_per_pixel;
+		double y2 = (cur_y+origin_y+lidar_yoffs+sin(M_PI*(cur_angle-north_corr+(double)ip)/180.0) * second)/mm_per_pixel;
 		sf::RectangleShape rect(sf::Vector2f( sqrt(pow(x2-x1,2)+pow(y2-y1,2)), lidar_line_thick));
 		rect.setOrigin(0, lidar_line_thick/2.0);
 		rect.setPosition(x1, y1);
 		rect.setRotation(atan2(y2-y1,x2-x1)*180.0/M_PI);
-		rect.setFillColor(sf::Color(220,30,30));
+		rect.setFillColor(sf::Color(200,20,20));
 
 		win.draw(rect);
+	}
+
+	for(int i = 0; i < 360; i++)
+	{
+
+		// Draw sonars
+		for(int so = 0; so < 3; so++)
+		{
+			int angle_comp = (int)cur_angle + 47 + sonar_angles[so];
+//			printf("i=%d  cur_angle=%f  angle_comp=%d\n", i, cur_angle, angle_comp);
+
+			if(angle_comp < 0) angle_comp += 360;
+			if(angle_comp > 359) angle_comp -= 360;
+			if(i == angle_comp)
+			{
+				double a = angle_comp;
+				int in2 = i-4;
+				int ip2 = i+4;
+				if(in2<0) in2+=360;
+				if(ip2>359) ip2-=360;
+
+				double x1 = (cur_x+origin_x+cos(0.5*M_PI*(a-north_corr+(double)in2)/180.0) * (sonars[so]+(int)robot_ys/2))/mm_per_pixel;
+				double y1 = (cur_y+origin_y+sin(0.5*M_PI*(a-north_corr+(double)in2)/180.0) * (sonars[so]+(int)robot_ys/2))/mm_per_pixel;
+				double x2 = (cur_x+origin_x+cos(0.5*M_PI*(a-north_corr+(double)ip2)/180.0) * (sonars[so]+(int)robot_ys/2))/mm_per_pixel;
+				double y2 = (cur_y+origin_y+sin(0.5*M_PI*(a-north_corr+(double)ip2)/180.0) * (sonars[so]+(int)robot_ys/2))/mm_per_pixel;
+				sf::RectangleShape son1(sf::Vector2f( sqrt(pow(x2-x1,2)+pow(y2-y1,2)), sonar_line_thick));
+				son1.setOrigin(0, sonar_line_thick/2.0);
+				son1.setPosition(x1, y1);
+				son1.setRotation(atan2(y2-y1,x2-x1)*180.0/M_PI);
+				son1.setFillColor(sf::Color(10,10,128));
+
+				win.draw(son1);
+
+			}
+		}
+
 	}
 }
 
@@ -244,6 +291,14 @@ void draw_texts(sf::RenderWindow& win)
 	t.setCharacterSize(14);
 	t.setColor(sf::Color(0,0,0));
 	t.setPosition(10,10+7*22);
+	win.draw(t);
+
+
+	sprintf(buf, "son1 = %d  son2 = %d  son3 = %d  lidar_status=%02xh", sonars[0], sonars[1], sonars[2], lidar_status);
+	t.setString(buf);
+	t.setCharacterSize(14);
+	t.setColor(sf::Color(0,0,0));
+	t.setPosition(10,10+8*22);
 	win.draw(t);
 
 	if(manual_control)
@@ -568,10 +623,18 @@ int main(int argc, char** argv)
 				break;
 
 				case 0x84:
+				lidar_status = parsebuf[1];
 				for(int i = 0; i < 360; i++)
 				{
 					lidar_scan[360-i] = parsebuf[2+2*i+1]<<7 | parsebuf[2+2*i];
 				}
+				break;
+
+				case 0x85:
+				sonars[0] = (I14x2_I16(parsebuf[3], parsebuf[2]))>>2;
+				sonars[1] = (I14x2_I16(parsebuf[5], parsebuf[4]))>>2;
+				sonars[2] = (I14x2_I16(parsebuf[7], parsebuf[6]))>>2;
+
 				break;
 
 				case 0xa0:
