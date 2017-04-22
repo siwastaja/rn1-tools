@@ -50,7 +50,7 @@ int set_uart_attribs(int fd, int speed)
 int uart;
 
 #define BUFLEN 2048
- 
+
 int main (int argc, char** argv)
 {
 	uint8_t uart_rx_buf[MAXBUF];
@@ -112,6 +112,7 @@ int main (int argc, char** argv)
 
 	int fds_size = udpsock;
 	if(uart > fds_size) fds_size = uart;
+	if(STDIN_FILENO > fds_size) fds_size = STDIN_FILENO;
 	fds_size+=1;
 
 	int rxloc = 0;
@@ -119,17 +120,26 @@ int main (int argc, char** argv)
 	int subscriber = 0;
 	int subs_addr_len = 0;
 
+	printf("RN#1 UDP relay server started, listening incoming UDP datagrams on port %u. Enter Q to exit.\n", port);
+
 	while(1)
 	{
 		FD_ZERO(&fds);
 		FD_SET(udpsock, &fds);
 		FD_SET(uart, &fds);
+		FD_SET(STDIN_FILENO, &fds);
 		if (select(fds_size, &fds, NULL, NULL, NULL) < 0)
 		{
 			printf("select() failed");
 			return 1;
 		}
 
+		if(FD_ISSET(STDIN_FILENO, &fds))
+		{
+			int cmd = fgetc(stdin);
+			if(cmd == 'Q')
+				break;
+		}
 		if(FD_ISSET(udpsock, &fds))
 		{
 //			printf("UDP!!!\n");
@@ -195,5 +205,10 @@ int main (int argc, char** argv)
 
 	}
 
+	printf("User-requested exit.\n");
+	close(udpsock);
+	close(uart);
+	fflush(stdin);
+	return 0;
 }
 
