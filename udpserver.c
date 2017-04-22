@@ -194,9 +194,7 @@ int main (int argc, char** argv)
 					}
 				}
 
-				uart_rx_buf[0] = byte;
-				rxloc = 1;
-				break;
+				rxloc = 0;
 			}
 
 			uart_rx_buf[rxloc] = byte;
