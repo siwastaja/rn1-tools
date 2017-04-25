@@ -23,6 +23,7 @@
 sf::Font arial;
 
 int manual_control = 1;
+int control_on = 0;
 
 double mm_per_pixel = 10.0;
 
@@ -32,17 +33,27 @@ int screen_y = 768;
 double origin_x = ((double)screen_x/2.0)*mm_per_pixel;
 double origin_y = ((double)screen_y/2.0)*mm_per_pixel;
 
+double robot_xs = 480.0;
+double robot_ys = 520.0;
+double lidar_xoffs = 0.0;
+double lidar_yoffs = -120.0;
+
 double cur_x = 0.0;
 double cur_y = 0.0;
 double cur_angle = 0.0;
-double north_corr = -100.0;
+double cur_angle_at_lidar_update;
+double cur_compass;
+double north_corr = 0.0;
+
+double bat_voltage = 0.0;
 
 const double lidar_line_thick = 2.0;
+const double sonar_line_thick = 4.0;
 
 int speed = 0;
 int angle_cmd = 0;
 
-double int_x, int_y;
+double int_x, int_y, opt_q;
 
 int d1;
 
@@ -50,6 +61,10 @@ int32_t dbg1, dbg2, dbg3, dbg4;
 
 int auto_angle = 0;
 int auto_fwd = 0;
+
+int lidar_status = 0;
+
+int odbg[6] = {300,300,300,300,300,300};
 
 int set_uart_attribs(int fd, int speed)
 {
@@ -120,18 +135,29 @@ void draw_robot(sf::RenderWindow& win)
 {
 	sf::ConvexShape r(5);
 	r.setPoint(0, sf::Vector2f(0,0));
-	r.setPoint(1, sf::Vector2f(0,12));
-	r.setPoint(2, sf::Vector2f(15,12));
-	r.setPoint(3, sf::Vector2f(20,6));
-	r.setPoint(4, sf::Vector2f(15,0));
+	r.setPoint(1, sf::Vector2f(0,robot_ys/mm_per_pixel));
+	r.setPoint(2, sf::Vector2f(robot_xs/mm_per_pixel,robot_ys/mm_per_pixel));
+	r.setPoint(3, sf::Vector2f(1.3*robot_xs/mm_per_pixel,0.5*robot_ys/mm_per_pixel));
+	r.setPoint(4, sf::Vector2f(robot_xs/mm_per_pixel,0));
+
+
+	r.setFillColor(sf::Color(100,35,25));
+	r.setOrigin(0.5*robot_xs/mm_per_pixel,0.5*robot_ys/mm_per_pixel);
+
+	r.setRotation(cur_compass-north_corr);
+	r.setPosition((cur_x+origin_x)/mm_per_pixel,(cur_y+origin_y)/mm_per_pixel);
+
+	win.draw(r);
+
 
 	r.setFillColor(sf::Color(200,70,50));
-	r.setOrigin(10,6);
+	r.setOrigin(0.5*robot_xs/mm_per_pixel,0.5*robot_ys/mm_per_pixel);
 
 	r.setRotation(cur_angle-north_corr);
 	r.setPosition((cur_x+origin_x)/mm_per_pixel,(cur_y+origin_y)/mm_per_pixel);
 
 	win.draw(r);
+
 
 	if(!manual_control)
 	{
@@ -150,6 +176,9 @@ void draw_robot(sf::RenderWindow& win)
 
 int lidar_scan[360];
 
+int sonars[3] = {1000,1000,1000};
+int sonar_angles[3] = {-8, 0, 8};
+
 void draw_lidar(sf::RenderWindow& win)
 {
 	for(int i = 0; i < 360; i++)
@@ -164,20 +193,59 @@ void draw_lidar(sf::RenderWindow& win)
 		if(first == 0) first = second;
 		else if(second == 0) second = first;
 
-		if(abs(first-second) > 300)
+		if(abs(first-second) > 200)
 			continue;
 
-		double x1 = (cur_x+origin_x+cos(M_PI*(cur_angle-north_corr+(double)i)/180.0) * first)/mm_per_pixel;
-		double y1 = (cur_y+origin_y+sin(M_PI*(cur_angle-north_corr+(double)i)/180.0) * first)/mm_per_pixel;
-		double x2 = (cur_x+origin_x+cos(M_PI*(cur_angle-north_corr+(double)ip)/180.0) * second)/mm_per_pixel;
-		double y2 = (cur_y+origin_y+sin(M_PI*(cur_angle-north_corr+(double)ip)/180.0) * second)/mm_per_pixel;
+		double x1 = (cur_x+origin_x+lidar_xoffs+cos(M_PI*(cur_angle_at_lidar_update-north_corr+(double)i)/180.0) * first)/mm_per_pixel;
+		double y1 = (cur_y+origin_y+lidar_yoffs+sin(M_PI*(cur_angle_at_lidar_update-north_corr+(double)i)/180.0) * first)/mm_per_pixel;
+		double x2 = (cur_x+origin_x+lidar_xoffs+cos(M_PI*(cur_angle_at_lidar_update-north_corr+(double)ip)/180.0) * second)/mm_per_pixel;
+		double y2 = (cur_y+origin_y+lidar_yoffs+sin(M_PI*(cur_angle_at_lidar_update-north_corr+(double)ip)/180.0) * second)/mm_per_pixel;
 		sf::RectangleShape rect(sf::Vector2f( sqrt(pow(x2-x1,2)+pow(y2-y1,2)), lidar_line_thick));
 		rect.setOrigin(0, lidar_line_thick/2.0);
 		rect.setPosition(x1, y1);
 		rect.setRotation(atan2(y2-y1,x2-x1)*180.0/M_PI);
-		rect.setFillColor(sf::Color(220,30,30));
+		rect.setFillColor(sf::Color(200,20,20));
 
 		win.draw(rect);
+	}
+
+	for(int i = 0; i < 360; i++)
+	{
+
+		// Draw sonars
+		for(int so = 0; so < 3; so++)
+		{
+			if(!sonars[so])
+				continue;
+
+			int angle_comp = (int)cur_angle + sonar_angles[so];
+//			printf("i=%d  cur_angle=%f  angle_comp=%d\n", i, cur_angle, angle_comp);
+
+			if(angle_comp < 0) angle_comp += 360;
+			if(angle_comp > 359) angle_comp -= 360;
+			if(i == angle_comp)
+			{
+				double a = angle_comp;
+				int in2 = i-4;
+				int ip2 = i+4;
+				if(in2<0) in2+=360;
+				if(ip2>359) ip2-=360;
+
+				double x1 = (cur_x+origin_x+cos(M_PI*(/*a*/-north_corr+(double)in2)/180.0) * (sonars[so]+(int)robot_ys/2))/mm_per_pixel;
+				double y1 = (cur_y+origin_y+sin(M_PI*(/*a*/-north_corr+(double)in2)/180.0) * (sonars[so]+(int)robot_ys/2))/mm_per_pixel;
+				double x2 = (cur_x+origin_x+cos(M_PI*(/*a*/-north_corr+(double)ip2)/180.0) * (sonars[so]+(int)robot_ys/2))/mm_per_pixel;
+				double y2 = (cur_y+origin_y+sin(M_PI*(/*a*/-north_corr+(double)ip2)/180.0) * (sonars[so]+(int)robot_ys/2))/mm_per_pixel;
+				sf::RectangleShape son1(sf::Vector2f( sqrt(pow(x2-x1,2)+pow(y2-y1,2)), sonar_line_thick));
+				son1.setOrigin(0, sonar_line_thick/2.0);
+				son1.setPosition(x1, y1);
+				son1.setRotation(atan2(y2-y1,x2-x1)*180.0/M_PI);
+				son1.setFillColor(sf::Color(10,10,128));
+
+				win.draw(son1);
+
+			}
+		}
+
 	}
 }
 
@@ -225,7 +293,7 @@ void draw_texts(sf::RenderWindow& win)
 	t.setPosition(10,10+4*22);
 	win.draw(t);
 
-	sprintf(buf, "X = %.0f, Y = %.0f", int_x, int_y);
+	sprintf(buf, "X = %.0f, Y = %.0f,  opt_quality=%.0f", int_x, int_y, opt_q);
 	t.setString(buf);
 	t.setCharacterSize(16);
 	t.setColor(sf::Color(0,0,0));
@@ -246,9 +314,26 @@ void draw_texts(sf::RenderWindow& win)
 	t.setPosition(10,10+7*22);
 	win.draw(t);
 
+
+	sprintf(buf, "son1 = %d  son2 = %d  son3 = %d  lidar_status=%02xh", sonars[0], sonars[1], sonars[2], lidar_status);
+	t.setString(buf);
+	t.setCharacterSize(14);
+	t.setColor(sf::Color(0,0,0));
+	t.setPosition(10,10+8*22);
+	win.draw(t);
+
+	sprintf(buf, "odbg  %d  %d  %d  %d  %d  %d  ", odbg[0],odbg[1],odbg[2],odbg[3],odbg[4],odbg[5]);
+	t.setString(buf);
+	t.setCharacterSize(14);
+	t.setColor(sf::Color(0,0,0));
+	t.setPosition(10,10+9*22);
+	win.draw(t);
+
+
+
 	if(manual_control)
 	{
-		sprintf(buf, "MANUAL CONTROL");
+		sprintf(buf, control_on?"MANUAL CONTROL":"MAN CTRL OFF");
 		t.setCharacterSize(20);
 		t.setColor(sf::Color(220,40,20));
 	}
@@ -263,11 +348,25 @@ void draw_texts(sf::RenderWindow& win)
 	win.draw(t);
 
 
+	double vlevel = ((bat_voltage-3.1*5.0)/5.0)*(4.2-3.1); // 1 = full, 0 = empty
+
+	sprintf(buf, "BATT %2.2f V (%.0f%%)", bat_voltage, vlevel*100.0);
+	t.setString(buf);
+	t.setCharacterSize(18);
+	int r = (1.0-vlevel)*250.0;
+	int g = vlevel*250.0;
+	if(r > 250) r = 250; if(r<0) r=0;
+	if(g > 250) g = 250; if(g<0) g=0;
+	t.setColor(sf::Color(r,g,0));
+	t.setPosition(screen_x-180,screen_y-40);
+	win.draw(t);
+
 }
 
 int main(int argc, char** argv)
 {
 	int return_pressed = 0;
+	int c_pressed = 0;
 	uint8_t rxbuf[1024];
 	uint8_t parsebuf[1024];
 	int do_parse = 0;
@@ -362,13 +461,13 @@ int main(int argc, char** argv)
 
 		if(sf::Keyboard::isKeyPressed(sf::Keyboard::PageUp))
 		{
-			mm_per_pixel *= 1.1;
+			mm_per_pixel *= 1.05;
 			origin_x = ((double)screen_x/2.0)*mm_per_pixel;
 			origin_y = ((double)screen_y/2.0)*mm_per_pixel;
 		}
 		if(sf::Keyboard::isKeyPressed(sf::Keyboard::PageDown))
 		{
-			mm_per_pixel *= 0.9;
+			mm_per_pixel *= 0.95;
 			origin_x = ((double)screen_x/2.0)*mm_per_pixel;
 			origin_y = ((double)screen_y/2.0)*mm_per_pixel;
 		}
@@ -456,10 +555,12 @@ int main(int argc, char** argv)
 			{
 				if(!return_pressed)
 				{
+					double fauto = auto_angle/360.0*65536.0;
+					int iauto = fauto;
 					return_pressed = 1;
 					txbuf[0] = 0x81;
-					txbuf[1] = I16_MS(auto_angle*16);
-					txbuf[2] = I16_LS(auto_angle*16);
+					txbuf[1] = I16_MS(iauto);
+					txbuf[2] = I16_LS(iauto);
 					txbuf[3] = 0;
 					txbuf[4] = 0;
 					txbuf[5] = 0xff;
@@ -470,6 +571,25 @@ int main(int argc, char** argv)
 			{
 				return_pressed = 0;
 			}
+			if(sf::Keyboard::isKeyPressed(sf::Keyboard::C))
+			{
+				if(!c_pressed)
+				{
+					if(sf::Keyboard::isKeyPressed(sf::Keyboard::LShift))
+						txbuf[0] = 0x92;
+					else
+						txbuf[0] = 0x91;
+					txbuf[1] = 0;
+					txbuf[2] = 0xff;
+					snd(3);
+				}
+			}
+			else
+			{
+				c_pressed = 0;
+			}
+
+
 		}
 
 
@@ -496,9 +616,15 @@ int main(int argc, char** argv)
 			txbuf[2] = 0xff;
 			snd(3);
 		}
+		if(sf::Keyboard::isKeyPressed(sf::Keyboard::F10))
+		{
+			manual_control = 1;
+			control_on = 0;
+		}
 		if(sf::Keyboard::isKeyPressed(sf::Keyboard::F11))
 		{
 			manual_control = 1;
+			control_on = 1;
 		}
 		if(sf::Keyboard::isKeyPressed(sf::Keyboard::F12))
 		{
@@ -568,31 +694,60 @@ int main(int argc, char** argv)
 				break;
 
 				case 0x84:
+				lidar_status = parsebuf[1];
 				for(int i = 0; i < 360; i++)
 				{
 					lidar_scan[360-i] = parsebuf[2+2*i+1]<<7 | parsebuf[2+2*i];
 				}
+				cur_angle_at_lidar_update = cur_angle;
+				break;
+
+				case 0x85:
+				sonars[0] = (I14x2_I16(parsebuf[3], parsebuf[2]))>>2;
+				sonars[1] = (I14x2_I16(parsebuf[5], parsebuf[4]))>>2;
+				sonars[2] = (I14x2_I16(parsebuf[7], parsebuf[6]))>>2;
+
 				break;
 
 				case 0xa0:
 				{
-					double new_angle = (double)(I14x2_I16(parsebuf[3], parsebuf[2])>>2);
-					if(fabs(gyro_z) > 500.0)
+					double new_angle = (double)(I14x2_I16(parsebuf[2], parsebuf[3]));
+					new_angle = new_angle * 360.0 / 65536.0;
+/*					if(fabs(gyro_z) > 500.0)
 						cur_angle = (new_angle + 1.0*cur_angle)/2.0;
 					else if(fabs(gyro_z) > 250.0)
 						cur_angle = (new_angle + 3.0*cur_angle)/4.0;
 					else
 						cur_angle = (new_angle + 10.0*cur_angle)/11.0;
+*/
+					cur_angle = new_angle;
+					double new_compass = (double)(I14x2_I16(parsebuf[6], parsebuf[7]));
+					new_compass = new_compass * 360.0 / 65536.0;
+					cur_compass = new_compass;
+
 				}
 				break;
 
 				case 0xa1:
 				{
-					int_x = (double)(I14x2_I16(parsebuf[3], parsebuf[2])>>2);
-					int_y = (double)(I14x2_I16(parsebuf[5], parsebuf[4])>>2);
+					int_x = (double)(I14x2_I16(parsebuf[2], parsebuf[3]))/4.0;
+					int_y = (double)(I14x2_I16(parsebuf[4], parsebuf[5]))/4.0;
+					opt_q = (double)parsebuf[6];
+
+					odbg[0] = parsebuf[6];
+					odbg[1] = parsebuf[7];
+					odbg[2] = parsebuf[8];
+					odbg[3] = parsebuf[9];
+					odbg[4] = parsebuf[10];
+					odbg[5] = parsebuf[11];
 				}
 				break;
 
+				case 0xa2:
+				{
+					bat_voltage = (double)(I14x2_I16(parsebuf[2], parsebuf[3]))/22200.0 * 17.73; // 17.73V = 22200
+				}
+				break;
 				case 0xd1:
 				{
 					d1 = (((int)parsebuf[1])<<9) | (((int)parsebuf[2])<<2)>>2;
@@ -625,7 +780,7 @@ int main(int argc, char** argv)
 //		}
 
 
-		if(manual_control)
+		if(manual_control && control_on)
 		{
 			txbuf[0] = 0x80;
 			txbuf[1] = ( (uint8_t)(speed<<1) ) >> 1;
