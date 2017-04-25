@@ -168,8 +168,16 @@ void draw_robot(sf::RenderWindow& win)
 		t.setString(buf);
 		t.setCharacterSize(14);
 		t.setColor(sf::Color(0,0,0));
-		t.setPosition((cur_x+origin_x)/mm_per_pixel,((cur_y+origin_y)/mm_per_pixel)+20.0);
+		t.setPosition((cur_x+origin_x)/mm_per_pixel-10.0,((cur_y+origin_y)/mm_per_pixel)+20.0);
 		win.draw(t);
+
+		sprintf(buf, "%d", auto_fwd);
+		t.setString(buf);
+		t.setCharacterSize(16);
+		t.setColor(sf::Color(0,0,0));
+		t.setPosition((cur_x+origin_x)/mm_per_pixel-10.0,((cur_y+origin_y)/mm_per_pixel)-20.0);
+		win.draw(t);
+
 	}
 
 }
@@ -558,6 +566,14 @@ int main(int argc, char** argv)
 			{
 				auto_angle++;
 			}
+			if(sf::Keyboard::isKeyPressed(sf::Keyboard::Up))
+			{
+				auto_fwd+=10;
+			}
+			if(sf::Keyboard::isKeyPressed(sf::Keyboard::Down))
+			{
+				auto_fwd-=10;
+			}
 			if(sf::Keyboard::isKeyPressed(sf::Keyboard::Return))
 			{
 				if(!return_pressed)
@@ -568,8 +584,8 @@ int main(int argc, char** argv)
 					txbuf[0] = 0x81;
 					txbuf[1] = I16_MS(iauto);
 					txbuf[2] = I16_LS(iauto);
-					txbuf[3] = 0;
-					txbuf[4] = 0;
+					txbuf[3] = I16_MS(auto_fwd);
+					txbuf[4] = I16_LS(auto_fwd);
 					txbuf[5] = 0xff;
 					snd(6);
 				}
@@ -578,6 +594,7 @@ int main(int argc, char** argv)
 			{
 				return_pressed = 0;
 			}
+
 			if(sf::Keyboard::isKeyPressed(sf::Keyboard::C))
 			{
 				if(!c_pressed)
