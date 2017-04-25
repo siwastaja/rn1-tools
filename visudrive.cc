@@ -472,7 +472,14 @@ int main(int argc, char** argv)
 			origin_y = ((double)screen_y/2.0)*mm_per_pixel;
 		}
 
-
+		if(sf::Keyboard::isKeyPressed(sf::Keyboard::F5))
+		{
+			uint8_t sub[2] = {123, sf::Keyboard::isKeyPressed(sf::Keyboard::LShift)?0xbb:0xaa};
+			if(udpsock.send(sub, 2, serv_ip, serv_port) != sf::Socket::Done)
+			{
+				printf("UDP send error.\n");
+			}
+		}
 
 		if(manual_control)
 		{

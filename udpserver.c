@@ -158,6 +158,11 @@ int main (int argc, char** argv)
 					memcpy(&si_subscriber, &si_other, sizeof(si_other));
 					subs_addr_len = slen;
 				}
+				else if(recv_len >= 2 && buf[0] == 123 && buf[1] == 0xbb)
+				{
+					printf("Exit requested remotely!\n");
+					break;
+				}
 				else
 				{
 //					printf("uart write\n");
