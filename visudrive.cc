@@ -57,7 +57,7 @@ double int_x, int_y, opt_q;
 
 int d1;
 
-int32_t dbg1, dbg2, dbg3, dbg4;
+int32_t dbg[10];
 
 int auto_angle = 0;
 int auto_fwd = 0;
@@ -65,6 +65,9 @@ int auto_fwd = 0;
 int lidar_status = 0;
 
 int odbg[6] = {300,300,300,300,300,300};
+
+int charging = 0;
+int charge_finished = 0;
 
 int set_uart_attribs(int fd, int speed)
 {
@@ -315,12 +318,15 @@ void draw_texts(sf::RenderWindow& win)
 	t.setPosition(10,10+6*22);
 	win.draw(t);
 
-	sprintf(buf, "dbg1 = %d  dbg2 = %d  dbg3 = %d  dbg4 = %d", dbg1, dbg2, dbg3, dbg4);
-	t.setString(buf);
-	t.setCharacterSize(14);
+	t.setCharacterSize(12);
 	t.setColor(sf::Color(0,0,0));
-	t.setPosition(10,10+7*22);
-	win.draw(t);
+	for(int i = 0; i<10; i++)
+	{
+		sprintf(buf, "dbg[%2i] = %11d (%08x)", i, dbg[i], dbg[i]);
+		t.setString(buf);
+		t.setPosition(10,screen_y-170 + 15*i);
+		win.draw(t);
+	}
 
 
 	sprintf(buf, "son1 = %d  son2 = %d  son3 = %d  lidar_status=%02xh", sonars[0], sonars[1], sonars[2], lidar_status);
@@ -368,6 +374,24 @@ void draw_texts(sf::RenderWindow& win)
 	t.setColor(sf::Color(r,g,0));
 	t.setPosition(screen_x-180,screen_y-40);
 	win.draw(t);
+
+	if(charging)
+	{
+		t.setString("charging");
+		t.setCharacterSize(16);
+		t.setColor(sf::Color(200,100,0));
+		t.setPosition(screen_x-180,screen_y-80);
+		win.draw(t);
+	}
+
+	if(charge_finished)
+	{
+		t.setString("chrg ended");
+		t.setCharacterSize(16);
+		t.setColor(sf::Color(200,100,0));
+		t.setPosition(screen_x-180,screen_y-60);
+		win.draw(t);
+	}
 
 }
 
@@ -544,6 +568,8 @@ int main(int argc, char** argv)
 				speed -= 2;
 				if(speed < -15) speed = -15;
 			}
+
+
 		}
 		else // automatic control
 		{
@@ -769,6 +795,8 @@ int main(int argc, char** argv)
 
 				case 0xa2:
 				{
+					charging = parsebuf[1]&1;
+					charge_finished = parsebuf[1]&2;
 					bat_voltage = (double)(I14x2_I16(parsebuf[2], parsebuf[3]))/22200.0 * 17.73; // 17.73V = 22200
 				}
 				break;
@@ -780,10 +808,10 @@ int main(int argc, char** argv)
 
 				case 0xd2:
 				{
-					dbg1 = I7x5_I32(parsebuf[1],parsebuf[2],parsebuf[3],parsebuf[4],parsebuf[5]);
-					dbg2 = I7x5_I32(parsebuf[6],parsebuf[7],parsebuf[8],parsebuf[9],parsebuf[10]);
-					dbg3 = I7x5_I32(parsebuf[11],parsebuf[12],parsebuf[13],parsebuf[14],parsebuf[15]);
-					dbg4 = I7x5_I32(parsebuf[16],parsebuf[17],parsebuf[18],parsebuf[19],parsebuf[20]);
+					for(int i=0; i<10; i++)
+					{
+						dbg[i] = I7x5_I32(parsebuf[i*5+1],parsebuf[i*5+2],parsebuf[i*5+3],parsebuf[i*5+4],parsebuf[i*5+5]);
+					}
 				}
 				break;
 
@@ -815,10 +843,9 @@ int main(int argc, char** argv)
 
 		}
 
-		draw_texts(win);
-
 		draw_robot(win);
 		draw_lidar(win);
+		draw_texts(win);
 
 		win.display();
 
