@@ -35,8 +35,10 @@ double origin_y = ((double)screen_y/2.0)*mm_per_pixel;
 
 double robot_xs = 480.0;
 double robot_ys = 520.0;
+double robot_xs2 = 470.0;
+double robot_ys2 = 510.0;
 double lidar_xoffs = 0.0;
-double lidar_yoffs = -120.0;
+double lidar_yoffs = -100.0;
 
 double cur_x = 0.0;
 double cur_y = 0.0;
@@ -144,7 +146,7 @@ void draw_robot(sf::RenderWindow& win)
 	r.setPoint(4, sf::Vector2f(robot_xs/mm_per_pixel,0));
 
 
-	r.setFillColor(sf::Color(100,35,25));
+	r.setFillColor(sf::Color(200,135,135));
 	r.setOrigin(0.5*robot_xs/mm_per_pixel,0.5*robot_ys/mm_per_pixel);
 
 	r.setRotation(cur_compass-north_corr);
@@ -153,7 +155,7 @@ void draw_robot(sf::RenderWindow& win)
 	win.draw(r);
 
 
-	r.setFillColor(sf::Color(200,70,50));
+	r.setFillColor(sf::Color(180,100,70));
 	r.setOrigin(0.5*robot_xs/mm_per_pixel,0.5*robot_ys/mm_per_pixel);
 
 	r.setRotation(cur_angle-north_corr);
@@ -161,9 +163,54 @@ void draw_robot(sf::RenderWindow& win)
 
 	win.draw(r);
 
+	sf::ConvexShape r2(4);
+	r2.setPoint(0, sf::Vector2f(0,0));
+	r2.setPoint(1, sf::Vector2f(0,robot_ys2/mm_per_pixel));
+	r2.setPoint(2, sf::Vector2f(robot_xs2/mm_per_pixel,robot_ys2/mm_per_pixel));
+	r2.setPoint(3, sf::Vector2f(robot_xs2/mm_per_pixel,0));
+
+	r2.setFillColor(sf::Color(230,70,50));
+	r2.setOrigin(0.5*robot_xs2/mm_per_pixel,0.5*robot_ys2/mm_per_pixel);
+
+	r2.setRotation(cur_angle-north_corr);
+	r2.setPosition((cur_x+origin_x)/mm_per_pixel,(cur_y+origin_y)/mm_per_pixel);
+
+	win.draw(r2);
+
 
 	if(!manual_control)
 	{
+		if(auto_fwd != 0)
+		{
+			// Draw robot at destination
+
+			r.setFillColor(sf::Color(0,255,0,128));
+
+			r.setRotation(cur_angle-north_corr+auto_angle);
+
+			double xmove = cos(M_PI*((double)(cur_angle-north_corr+auto_angle))/180.0) * (double)auto_fwd;
+			double ymove = sin(M_PI*((double)(cur_angle-north_corr+auto_angle))/180.0) * (double)auto_fwd;
+
+			r.setPosition((cur_x+origin_x+xmove)/mm_per_pixel,(cur_y+origin_y+ymove)/mm_per_pixel);
+
+			win.draw(r);
+
+			// Draw line to dest
+
+			double x1 = (cur_x+origin_x)/mm_per_pixel;
+			double y1 = (cur_y+origin_y)/mm_per_pixel;
+			double x2 = (cur_x+origin_x+xmove)/mm_per_pixel;
+			double y2 = (cur_y+origin_y+ymove)/mm_per_pixel;
+			sf::RectangleShape rect(sf::Vector2f( sqrt(pow(x2-x1,2)+pow(y2-y1,2)), 10.0));
+			rect.setOrigin(0, 5.0);
+			rect.setPosition(x1, y1);
+			rect.setRotation(atan2(y2-y1,x2-x1)*180.0/M_PI);
+			rect.setFillColor(sf::Color(0,0,0,90));
+
+			win.draw(rect);
+
+		}
+
 		sf::Text t;
 		t.setFont(arial);
 		char buf[128];
@@ -207,10 +254,13 @@ void draw_lidar(sf::RenderWindow& win)
 		if(abs(first-second) > 200)
 			continue;
 
-		double x1 = (cur_x+origin_x+lidar_xoffs+cos(M_PI*(cur_angle_at_lidar_update-north_corr+(double)i)/180.0) * first)/mm_per_pixel;
-		double y1 = (cur_y+origin_y+lidar_yoffs+sin(M_PI*(cur_angle_at_lidar_update-north_corr+(double)i)/180.0) * first)/mm_per_pixel;
-		double x2 = (cur_x+origin_x+lidar_xoffs+cos(M_PI*(cur_angle_at_lidar_update-north_corr+(double)ip)/180.0) * second)/mm_per_pixel;
-		double y2 = (cur_y+origin_y+lidar_yoffs+sin(M_PI*(cur_angle_at_lidar_update-north_corr+(double)ip)/180.0) * second)/mm_per_pixel;
+		double lidar_mount_x = lidar_yoffs * cos(M_PI*(cur_angle_at_lidar_update-north_corr)/180.0);
+		double lidar_mount_y = lidar_yoffs * sin(M_PI*(cur_angle_at_lidar_update-north_corr)/180.0);
+
+		double x1 = (cur_x+origin_x+lidar_mount_x+cos(M_PI*(cur_angle_at_lidar_update-north_corr+(double)i)/180.0) * first)/mm_per_pixel;
+		double y1 = (cur_y+origin_y+lidar_mount_y+sin(M_PI*(cur_angle_at_lidar_update-north_corr+(double)i)/180.0) * first)/mm_per_pixel;
+		double x2 = (cur_x+origin_x+lidar_mount_x+cos(M_PI*(cur_angle_at_lidar_update-north_corr+(double)ip)/180.0) * second)/mm_per_pixel;
+		double y2 = (cur_y+origin_y+lidar_mount_y+sin(M_PI*(cur_angle_at_lidar_update-north_corr+(double)ip)/180.0) * second)/mm_per_pixel;
 		sf::RectangleShape rect(sf::Vector2f( sqrt(pow(x2-x1,2)+pow(y2-y1,2)), lidar_line_thick));
 		rect.setOrigin(0, lidar_line_thick/2.0);
 		rect.setPosition(x1, y1);
@@ -322,6 +372,7 @@ void draw_texts(sf::RenderWindow& win)
 	t.setColor(sf::Color(0,0,0));
 	for(int i = 0; i<10; i++)
 	{
+//		if(i==2 || i==3) continue;
 		sprintf(buf, "dbg[%2i] = %11d (%08x)", i, dbg[i], dbg[i]);
 		t.setString(buf);
 		t.setPosition(10,screen_y-170 + 15*i);
@@ -398,6 +449,7 @@ void draw_texts(sf::RenderWindow& win)
 int main(int argc, char** argv)
 {
 	int return_pressed = 0;
+	int mouse_pressed = 0;
 	int c_pressed = 0;
 	uint8_t rxbuf[1024];
 	uint8_t parsebuf[1024];
@@ -464,26 +516,27 @@ int main(int argc, char** argv)
 		lidar_scan[i] = 1000+i;
 	}
 
-	lidar_scan[20] = 0;
-	lidar_scan[50] = 0;
-	lidar_scan[53] = 0;
-	lidar_scan[56] = 0;
-
-	lidar_scan[80] = 0;
-	lidar_scan[81] = 0;
-
-	lidar_scan[195] = 0;
-	lidar_scan[196] = 0;
-	lidar_scan[197] = 0;
-	lidar_scan[198] = 0;
-	lidar_scan[199] = 0;
-
 	tcflush(uart, TCIFLUSH);
 
 	int cnt = 0;
 	int cnt2 = 0;
+	int auto_subscribe_timeout = 0;
 	while(win.isOpen())
 	{
+		auto_subscribe_timeout++;
+
+		if(auto_subscribe_timeout > 100)
+		{
+			auto_subscribe_timeout = 0;
+			//printf("Auto subscribe\n");
+			uint8_t sub[2] = {123, 0xaa};
+			if(udpsock.send(sub, 2, serv_ip, serv_port) != sf::Socket::Done)
+			{
+				printf("UDP send error.\n");
+			}
+
+		}
+
 		sf::Event event;
 		while (win.pollEvent(event))
 		{
@@ -573,6 +626,29 @@ int main(int argc, char** argv)
 		}
 		else // automatic control
 		{
+			sf::Vector2i localPosition = sf::Mouse::getPosition(win);
+			double click_x = (localPosition.x * mm_per_pixel) - origin_x;
+			double click_y = (localPosition.y * mm_per_pixel) - origin_y;
+			if(sf::Mouse::isButtonPressed(sf::Mouse::Left))
+			{
+					auto_angle = -1* ((360.0/(2*M_PI)*atan2(click_x, click_y)) + cur_angle - 90 - north_corr);
+					auto_fwd = sqrt(click_x*click_x + click_y*click_y);
+					if(auto_angle < -180) auto_angle += 360;
+					else if(auto_angle > 180) auto_angle -= 360;
+					if(auto_angle < -180) auto_angle += 360;
+					else if(auto_angle > 180) auto_angle -= 360;
+			}
+			else if(sf::Mouse::isButtonPressed(sf::Mouse::Right))
+			{
+					auto_angle = -1* ((360.0/(2*M_PI)*atan2(click_x, click_y)) + cur_angle + 90 - north_corr);
+					auto_fwd = -1 * sqrt(click_x*click_x + click_y*click_y);
+					if(auto_angle < -180) auto_angle += 360;
+					else if(auto_angle > 180) auto_angle -= 360;
+					if(auto_angle < -180) auto_angle += 360;
+					else if(auto_angle > 180) auto_angle -= 360;
+			}
+
+
 			if(sf::Keyboard::isKeyPressed(sf::Keyboard::RShift))
 			{
 				int tt = 0;
@@ -614,6 +690,8 @@ int main(int argc, char** argv)
 					txbuf[4] = I16_LS(auto_fwd);
 					txbuf[5] = 0xff;
 					snd(6);
+					auto_angle = 0;
+					auto_fwd = 0;
 				}
 			}
 			else
@@ -643,7 +721,6 @@ int main(int argc, char** argv)
 		}
 
 
-
 		if(sf::Keyboard::isKeyPressed(sf::Keyboard::F1))
 		{
 			north_corr-=1.0;
@@ -654,14 +731,20 @@ int main(int argc, char** argv)
 		}
 		if(sf::Keyboard::isKeyPressed(sf::Keyboard::F3))
 		{
-			txbuf[0] = 0xd1;
+			if(sf::Keyboard::isKeyPressed(sf::Keyboard::LShift))
+				txbuf[0] = 0xd3;
+			else
+				txbuf[0] = 0xd1;
 			txbuf[1] = 0x01;
 			txbuf[2] = 0xff;
 			snd(3);
 		}
 		if(sf::Keyboard::isKeyPressed(sf::Keyboard::F4))
 		{
-			txbuf[0] = 0xd2;
+			if(sf::Keyboard::isKeyPressed(sf::Keyboard::LShift))
+				txbuf[0] = 0xd4;
+			else
+				txbuf[0] = 0xd2;
 			txbuf[1] = 0x01;
 			txbuf[2] = 0xff;
 			snd(3);
@@ -721,6 +804,9 @@ int main(int argc, char** argv)
 
 		if(do_parse)
 		{
+
+			auto_subscribe_timeout = 0;
+
 			switch(parsebuf[0])
 			{
 				case 0x80:
@@ -747,7 +833,7 @@ int main(int argc, char** argv)
 				lidar_status = parsebuf[1];
 				for(int i = 0; i < 360; i++)
 				{
-					lidar_scan[360-i] = parsebuf[2+2*i+1]<<7 | parsebuf[2+2*i];
+					lidar_scan[359-i] = parsebuf[2+2*i+1]<<7 | parsebuf[2+2*i];
 				}
 				cur_angle_at_lidar_update = cur_angle;
 				break;
