@@ -12,6 +12,8 @@
 #include <SFML/Graphics.hpp>
 #include <SFML/Network.hpp>
 
+//#define LOG_RX
+
 #ifndef M_PI
 #define M_PI 3.14159265358
 #endif
@@ -34,11 +36,11 @@ double origin_x = ((double)screen_x/2.0)*mm_per_pixel;
 double origin_y = ((double)screen_y/2.0)*mm_per_pixel;
 
 double robot_xs = 480.0;
-double robot_ys = 520.0;
+double robot_ys = 524.0;
 double robot_xs2 = 470.0;
 double robot_ys2 = 510.0;
 double lidar_xoffs = 0.0;
-double lidar_yoffs = -100.0;
+double lidar_yoffs = -120.0;
 
 double cur_x = 0.0;
 double cur_y = 0.0;
@@ -52,6 +54,7 @@ double north_corr = 0.0;
 double bat_voltage = 0.0;
 
 const double lidar_line_thick = 2.0;
+const double old_lidar_line_thick = 1.0;
 const double sonar_line_thick = 4.0;
 
 int speed = 0;
@@ -67,8 +70,6 @@ int auto_angle = 0;
 int auto_fwd = 0;
 
 int lidar_status = 0;
-
-int odbg[6] = {300,300,300,300,300,300};
 
 int charging = 0;
 int charge_finished = 0;
@@ -250,15 +251,15 @@ void take_lidar_snapshot()
 	static int ring_idx = 0;
 	static double prev_x = 0.0, prev_y = 0.0;
 
-	if(fabs(cur_x - prev_x) >= 500.0 || fabs(cur_y - prev_y) >= 500.0)
+//	if(fabs(cur_x - prev_x) >= 500.0 || fabs(cur_y - prev_y) >= 500.0)
 	{
 		prev_x = cur_x;
 		prev_y = cur_y;
 
 		memcpy(lidar_snapshots[ring_idx], lidar_scan, 360*sizeof(int));
-		ang_at_snapshot[ring_idx] = cur_angle;
-		x_at_snapshot[ring_idx] = cur_x;
-		y_at_snapshot[ring_idx] = cur_y;
+		ang_at_snapshot[ring_idx] = cur_angle_at_lidar_update;
+		x_at_snapshot[ring_idx] = cur_x_at_lidar_update;
+		y_at_snapshot[ring_idx] = cur_y_at_lidar_update;
 		if(++ring_idx >= NUM_LIDAR_SNAPSHOTS) ring_idx = 0;
 	}
 }
@@ -299,9 +300,9 @@ void draw_lidar(sf::RenderWindow& win, int* lid_data, int alpha, double ang, dou
 
 void draw_lidar_quick(sf::RenderWindow& win, int* lid_data, int alpha, double ang, double x, double y)
 {
-	for(int i = 2; i < 356; i+=2)
+	for(int i = 4; i < 354; i+=4)
 	{
-		int ip = (i+2);
+		int ip = (i+4);
 		int first = lid_data[i];
 		int second = lid_data[ip];
 
@@ -321,8 +322,8 @@ void draw_lidar_quick(sf::RenderWindow& win, int* lid_data, int alpha, double an
 		double y1 = (y+origin_y+lidar_mount_y+sin(M_PI*(ang-north_corr+(double)i)/180.0) * first)/mm_per_pixel;
 		double x2 = (x+origin_x+lidar_mount_x+cos(M_PI*(ang-north_corr+(double)ip)/180.0) * second)/mm_per_pixel;
 		double y2 = (y+origin_y+lidar_mount_y+sin(M_PI*(ang-north_corr+(double)ip)/180.0) * second)/mm_per_pixel;
-		sf::RectangleShape rect(sf::Vector2f( sqrt(pow(x2-x1,2)+pow(y2-y1,2)), lidar_line_thick));
-		rect.setOrigin(0, lidar_line_thick/2.0);
+		sf::RectangleShape rect(sf::Vector2f( sqrt(pow(x2-x1,2)+pow(y2-y1,2)), old_lidar_line_thick));
+		rect.setOrigin(0, old_lidar_line_thick/2.0);
 		rect.setPosition(x1, y1);
 		rect.setRotation(atan2(y2-y1,x2-x1)*180.0/M_PI);
 		rect.setFillColor(sf::Color(alpha,20,20));
@@ -376,6 +377,13 @@ double gyro_x, gyro_y, gyro_z, xcel_x, xcel_y, xcel_z, compass_x, compass_y, com
 
 void draw_texts(sf::RenderWindow& win)
 {
+	sf::RectangleShape rect(sf::Vector2f(4,4));
+	rect.setOrigin(2,2);
+	rect.setPosition(origin_x/mm_per_pixel, origin_y/mm_per_pixel);
+	rect.setFillColor(sf::Color(0,0,255));
+	win.draw(rect);
+
+
 	sf::Text t;
 	t.setFont(arial);
 	char buf[500];
@@ -416,7 +424,7 @@ void draw_texts(sf::RenderWindow& win)
 	t.setPosition(10,10+4*22);
 	win.draw(t);
 
-	sprintf(buf, "X = %.0f, Y = %.0f,  opt_quality=%.0f", int_x, int_y, opt_q);
+	sprintf(buf, "opt flow x = %.0f, y = %.0f,  opt_quality=%.0f", int_x, int_y, opt_q);
 	t.setString(buf);
 	t.setCharacterSize(16);
 	t.setColor(sf::Color(0,0,0));
@@ -449,18 +457,16 @@ void draw_texts(sf::RenderWindow& win)
 	t.setPosition(10,10+8*22);
 	win.draw(t);
 
-	sprintf(buf, "odbg  %d  %d  %d  %d  %d  %d  ", odbg[0],odbg[1],odbg[2],odbg[3],odbg[4],odbg[5]);
+	sprintf(buf, "X %5.0f  Y %5.0f  ang %5.1f", cur_x, cur_y, cur_angle);
 	t.setString(buf);
-	t.setCharacterSize(14);
-	t.setColor(sf::Color(0,0,0));
-	t.setPosition(10,10+9*22);
+	t.setCharacterSize(16);
+	t.setColor(sf::Color(0,100,0));
+	t.setPosition(screen_x-250,40);
 	win.draw(t);
-
-
 
 	if(manual_control)
 	{
-		sprintf(buf, control_on?"MANUAL CONTROL":"MAN CTRL OFF");
+		sprintf(buf, control_on?"MANUAL CONTROL":"CONTROL OFF");
 		t.setCharacterSize(20);
 		t.setColor(sf::Color(220,40,20));
 	}
@@ -471,7 +477,7 @@ void draw_texts(sf::RenderWindow& win)
 		t.setColor(sf::Color(40,220,20));
 	}
 	t.setString(buf);
-	t.setPosition(screen_x-200,10);
+	t.setPosition(screen_x-250,10);
 	win.draw(t);
 
 
@@ -569,6 +575,10 @@ int main(int argc, char** argv)
 	    return 1;
 	}
 
+#ifdef LOG_RX
+	FILE* rxlog = fopen("rxlog.txt", "w");
+	if(!rxlog) {printf("Error opening rxlog\n"); return -1;}
+#endif
 	sf::ContextSettings sets;
 	sets.antialiasingLevel = 8;
 	sf::RenderWindow win(sf::VideoMode(screen_x,screen_y), "RN#1 Visual Drive Hommeli Pommeli", sf::Style::Default, sets);
@@ -609,14 +619,18 @@ int main(int argc, char** argv)
 		if(sf::Keyboard::isKeyPressed(sf::Keyboard::PageUp))
 		{
 			mm_per_pixel *= 1.05;
-			origin_x = ((double)screen_x/2.0)*mm_per_pixel;
-			origin_y = ((double)screen_y/2.0)*mm_per_pixel;
+			origin_x *= 1.05;
+			origin_y *= 1.05;
+//			origin_x = ((double)screen_x/2.0)*mm_per_pixel;
+//			origin_y = ((double)screen_y/2.0)*mm_per_pixel;
 		}
 		if(sf::Keyboard::isKeyPressed(sf::Keyboard::PageDown))
 		{
 			mm_per_pixel *= 0.95;
-			origin_x = ((double)screen_x/2.0)*mm_per_pixel;
-			origin_y = ((double)screen_y/2.0)*mm_per_pixel;
+			origin_x *= 0.95;
+			origin_y *= 0.95;
+//			origin_x = ((double)screen_x/2.0)*mm_per_pixel;
+//			origin_y = ((double)screen_y/2.0)*mm_per_pixel;
 		}
 
 		if(sf::Keyboard::isKeyPressed(sf::Keyboard::F5))
@@ -626,6 +640,14 @@ int main(int argc, char** argv)
 			{
 				printf("UDP send error.\n");
 			}
+		}
+
+		if(sf::Keyboard::isKeyPressed(sf::Keyboard::F6))
+		{
+			txbuf[0] = sf::Keyboard::isKeyPressed(sf::Keyboard::LShift)?0xd2:0xd1;
+			txbuf[1] = 0;
+			txbuf[2] = 0xff;
+			snd(3);
 		}
 
 		if(manual_control)
@@ -711,24 +733,40 @@ int main(int argc, char** argv)
 			}
 
 
-			if(sf::Keyboard::isKeyPressed(sf::Keyboard::RShift))
-			{
-				int tt = 0;
-				if(auto_angle<0) { auto_angle *= -1; tt=1;}
-				int t = auto_angle%45;
-
-				if(t < 22) auto_angle -= t;
-				else auto_angle += 45-t;
-				if(tt) auto_angle *= -1;
-			}
-
 			if(sf::Keyboard::isKeyPressed(sf::Keyboard::Left))
 			{
-				origin_x -= 20.0;
+				if(sf::Keyboard::isKeyPressed(sf::Keyboard::RShift))
+				{
+					double fauto = -90/360.0*65536.0;
+					int iauto = fauto;
+					txbuf[0] = 0x81;
+					txbuf[1] = I16_MS(iauto);
+					txbuf[2] = I16_LS(iauto);
+					txbuf[3] = 0;
+					txbuf[4] = 0;
+					txbuf[5] = 0xff;
+					snd(6);
+				}
+				else
+					origin_x -= 20.0;
 			}
 			if(sf::Keyboard::isKeyPressed(sf::Keyboard::Right))
 			{
-				origin_x += 20.0;
+				if(sf::Keyboard::isKeyPressed(sf::Keyboard::RShift))
+				{
+					double fauto = 90/360.0*65536.0;
+					int iauto = fauto;
+					txbuf[0] = 0x81;
+					txbuf[1] = I16_MS(iauto);
+					txbuf[2] = I16_LS(iauto);
+					txbuf[3] = 0;
+					txbuf[4] = 0;
+					txbuf[5] = 0xff;
+					snd(6);
+
+				}
+				else
+					origin_x += 20.0;
 			}
 			if(sf::Keyboard::isKeyPressed(sf::Keyboard::Up))
 			{
@@ -824,6 +862,7 @@ int main(int argc, char** argv)
 		if(sf::Keyboard::isKeyPressed(sf::Keyboard::F12))
 		{
 			manual_control = 0;
+			control_on = 1;
 		}
 
 
@@ -860,6 +899,15 @@ int main(int argc, char** argv)
 			{
 //				printf("RECEIVED! len=%d  data = %u  %u  %u\n", len, rxbuf[0], rxbuf[1], rxbuf[2]);
 				memcpy(parsebuf, rxbuf, len);
+
+#ifdef LOG_RX
+				fprintf(rxlog, "len=%4d    ", len);
+				for(int i = 0; i < len; i++)
+				{
+					fprintf(rxlog, "%02x ", parsebuf[i]);
+				}
+				fprintf(rxlog, "\n");
+#endif
 				do_parse = 1;
 			}
 		}
@@ -892,18 +940,22 @@ int main(int argc, char** argv)
 				break;
 
 				case 0x84:
-				lidar_status = parsebuf[1];
-				for(int i = 0; i < 360; i++)
 				{
-					lidar_scan[359-i] = parsebuf[2+2*i+1]<<7 | parsebuf[2+2*i];
-				}
-				cur_angle_at_lidar_update = cur_angle;
-				cur_x_at_lidar_update = cur_x;
-				cur_y_at_lidar_update = cur_y;
+					lidar_status = parsebuf[1];
+					for(int i = 0; i < 360; i++)
+					{
+						lidar_scan[359-i] = parsebuf[14+2*i+1]<<7 | parsebuf[14+2*i];
+					}
+					double a = (double)(I14x2_I16(parsebuf[2], parsebuf[3]));
+					a = a * 360.0 / 65536.0;
+					cur_angle_at_lidar_update = a;
+					cur_x_at_lidar_update = I7x5_I32(parsebuf[4],parsebuf[5],parsebuf[6],parsebuf[7],parsebuf[8]);
+					cur_y_at_lidar_update = I7x5_I32(parsebuf[9],parsebuf[10],parsebuf[11],parsebuf[12],parsebuf[13]);
 
-				if(lidar_status&4)
-				{
-					take_lidar_snapshot();
+					if(lidar_status&4)
+					{
+						take_lidar_snapshot();
+					}
 				}
 				break;
 
@@ -941,13 +993,6 @@ int main(int argc, char** argv)
 					int_x = (double)(I14x2_I16(parsebuf[2], parsebuf[3]))/4.0;
 					int_y = (double)(I14x2_I16(parsebuf[4], parsebuf[5]))/4.0;
 					opt_q = (double)parsebuf[6];
-
-					odbg[0] = parsebuf[6];
-					odbg[1] = parsebuf[7];
-					odbg[2] = parsebuf[8];
-					odbg[3] = parsebuf[9];
-					odbg[4] = parsebuf[10];
-					odbg[5] = parsebuf[11];
 				}
 				break;
 
@@ -998,15 +1043,16 @@ int main(int argc, char** argv)
 			}
 			else
 			{
-				if(cnt&0b11 == 3) // Send but don't flood "I'm alive" messages.
+				if((cnt&0b11) == 3) // Send but don't flood "I'm alive" messages.
 				{
 					txbuf[0] = 0x8f;
 					txbuf[1] = 0;
-					txbuf[2] = 0;
+					txbuf[2] = 0xff;
 					snd(3);
 				}
 			}
 		}
+
 
 		draw_robot(win);
 		for(int l = 0; l < NUM_LIDAR_SNAPSHOTS; l++)
