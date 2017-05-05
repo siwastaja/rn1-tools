@@ -982,23 +982,30 @@ int main(int argc, char** argv)
 
 		cnt++;
 
-//		if(cnt >= 2)
-//		{
-//			cnt = 0;
-			if(speed > 0) speed--;
-			else if(speed < 0) speed++;
-//		}
+		if(speed > 0) speed--;
+		else if(speed < 0) speed++;
 
 
-		if(manual_control && control_on)
+		if(control_on)
 		{
-			txbuf[0] = 0x80;
-			txbuf[1] = ( (uint8_t)(speed<<1) ) >> 1;
-			txbuf[2] = ( (uint8_t)(angle_cmd<<1) ) >> 1;
-			txbuf[3] = 0xff;
-
-			snd(4);
-
+			if(manual_control)
+			{
+				txbuf[0] = 0x80;
+				txbuf[1] = ( (uint8_t)(speed<<1) ) >> 1;
+				txbuf[2] = ( (uint8_t)(angle_cmd<<1) ) >> 1;
+				txbuf[3] = 0xff;
+				snd(4);
+			}
+			else
+			{
+				if(cnt&0b11 == 3) // Send but don't flood "I'm alive" messages.
+				{
+					txbuf[0] = 0x8f;
+					txbuf[1] = 0;
+					txbuf[2] = 0;
+					snd(3);
+				}
+			}
 		}
 
 		draw_robot(win);
