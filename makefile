@@ -1,4 +1,7 @@
-all: prog mcprog visudrive udpserver
+all: prog mcprog visudrive udpserver lidar_comp_dev
+
+lidar_comp_dev: lidar_comp_dev.c
+	gcc lidar_comp_dev.c -o lidar_comp_dev -lm -std=c99
 
 mcprog: mcprog.c
 	gcc mcprog.c -o mcprog

@@ -74,6 +74,40 @@ int lidar_status = 0;
 int charging = 0;
 int charge_finished = 0;
 
+typedef struct
+{
+	int32_t angle;
+	int32_t x;
+	int32_t y;
+	int scan[360];
+} lidar_scan_t;
+
+lidar_scan_t dev_lidar_bef_in;
+lidar_scan_t dev_lidar_aft_in;
+lidar_scan_t dev_lidar_aft_out;
+int dev_show_lidars;
+
+void read_lidar(FILE* f, lidar_scan_t* l)
+{
+	fscanf(f, "%d %d %d", &l->angle, &l->x, &l->y);
+	for(int i = 0; i < 360; i++)
+	{
+		int t;
+		fscanf(f, "%d", &t);
+		l->scan[i] = t;
+	}
+}
+
+
+void write_lidar(FILE* f, lidar_scan_t* l)
+{
+	fprintf(f, "%d %d %d ", l->angle, l->x, l->y);
+	for(int i = 0; i < 360; i++)
+	{
+		fprintf(f, "%d ", l->scan[i]);
+	}	
+}
+
 int set_uart_attribs(int fd, int speed)
 {
 	struct termios tty;
@@ -518,6 +552,8 @@ int main(int argc, char** argv)
 {
 	int return_pressed = 0;
 	int mouse_pressed = 0;
+	int save_lidars = 0;
+	int f9_pressed = 0;
 	int c_pressed = 0;
 	uint8_t rxbuf[1024];
 	uint8_t parsebuf[1024];
@@ -864,6 +900,27 @@ int main(int argc, char** argv)
 			manual_control = 0;
 			control_on = 1;
 		}
+		if(sf::Keyboard::isKeyPressed(sf::Keyboard::F8))
+		{
+			save_lidars = 2;
+		}
+		if(sf::Keyboard::isKeyPressed(sf::Keyboard::F9))
+		{
+			if(!f9_pressed)
+			{
+				f9_pressed = 1;
+				FILE *f1 = fopen("lidar_before_in", "r");
+				FILE *f2 = fopen("lidar_after_in", "r");
+				FILE *f3 = fopen("lidar_after_out", "r");
+				if(!f1) printf("Can't open f1\n"); else read_lidar(f1, &dev_lidar_bef_in);
+				if(!f2) printf("Can't open f2\n"); else read_lidar(f2, &dev_lidar_aft_in);
+				if(!f3) printf("Can't open f3\n"); else read_lidar(f3, &dev_lidar_aft_out);
+				dev_show_lidars = 1;
+				fclose(f1); fclose(f2); fclose(f3);
+			}
+		}
+		else
+			f9_pressed = 0;
 
 
 		win.clear(sf::Color(180,220,255));
@@ -955,6 +1012,20 @@ int main(int argc, char** argv)
 					if(lidar_status&4)
 					{
 						take_lidar_snapshot();
+
+						if(save_lidars)
+						{
+							lidar_scan_t hommel;
+							for(int i = 0; i < 360; i++)
+								hommel.scan[i] = lidar_scan[i];
+							hommel.angle = ((int32_t)(I14x2_I16(parsebuf[2], parsebuf[3])))<<16;
+							hommel.x = cur_x_at_lidar_update;
+							hommel.y = cur_y_at_lidar_update;
+							FILE* f_scanout = fopen((save_lidars==2)?"lidar_before_in":"lidar_after_in", "w");
+							write_lidar(f_scanout, &hommel);
+							fclose(f_scanout);
+							save_lidars--;
+						}
 					}
 				}
 				break;
@@ -1053,7 +1124,14 @@ int main(int argc, char** argv)
 			}
 		}
 
-
+		if(dev_show_lidars)
+		{
+			draw_lidar(win, dev_lidar_bef_in.scan, 0, ((double)dev_lidar_bef_in.angle/4294967296.0)*360.0, dev_lidar_bef_in.x, dev_lidar_bef_in.y);
+			draw_lidar(win, dev_lidar_aft_in.scan, 127, ((double)dev_lidar_aft_in.angle/4294967296.0)*360.0, dev_lidar_aft_in.x, dev_lidar_aft_in.y);
+			draw_lidar(win, dev_lidar_aft_out.scan, 255, ((double)dev_lidar_aft_out.angle/4294967296.0)*360.0, dev_lidar_aft_out.x, dev_lidar_aft_out.y);
+		}
+		else
+		{
 		draw_robot(win);
 		for(int l = 0; l < NUM_LIDAR_SNAPSHOTS; l++)
 			draw_lidar_quick(win, lidar_snapshots[l], 100, ang_at_snapshot[l], x_at_snapshot[l], y_at_snapshot[l]);
@@ -1061,6 +1139,7 @@ int main(int argc, char** argv)
 
 		draw_sonars(win);
 		draw_texts(win);
+		}
 
 		win.display();
 
