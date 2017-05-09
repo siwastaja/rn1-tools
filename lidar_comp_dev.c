@@ -200,11 +200,24 @@ double q_calc_match_lvl(point_t* img1, point_t* img2, int img1_points, double ra
 		if(!img1[i].valid) continue;
 
 		int smallest = 2000000000;
-//		uint8_t odx = (uint8_t)((uint8_t)i - (uint8_t)85);
-//		for(int o = 0; o < 168; o++)
+
+		uint8_t odx = (uint8_t)((uint8_t)i - (uint8_t)65);
+		for(int o = 0; o < 128; o++)
+		{
+			odx++;
+			if(!img2[odx].valid) continue;
+			int dx = img2[odx].x - img1[i].x;
+			int dy = img2[odx].y - img1[i].y;
+			int dist = sq(dx) + sq(dy);
+			if(dist < smallest)
+			{
+				smallest = dist;
+			}
+		}
+
+/* Non-optimized code going through all points:
 		for(int o = 0; o < 256; o++)
 		{
-//			odx++;
 			if(!img2[o].valid) continue;
 			int dx = img2[o].x - img1[i].x;
 			int dy = img2[o].y - img1[i].y;
@@ -214,28 +227,12 @@ double q_calc_match_lvl(point_t* img1, point_t* img2, int img1_points, double ra
 				smallest = dist;
 			}
 		}
-
+*/
 		double dist_scaled;
 
-		if(alter)
-		{
-			dist_scaled = sqrt((double)smallest);
-
-			dist_sum += sqrt(dist_scaled);
-			matches++;
-
-		}
-		else
-		{
-			dist_scaled = (double)smallest;
-
-			if(dist_scaled < radius*radius)
-			{
-				dist_sum += dist_scaled;
-				matches++;
-			}
-
-		}
+		dist_scaled = sqrt((double)smallest);
+		dist_sum += sqrt(dist_scaled);
+		matches++;
 	}
 
 	dev_matches = matches;
@@ -354,6 +351,116 @@ int main(int argc, char** argv)
 	int best_y;
 
 	fprintf(f_csv, "a,x,y,lvl,n_matches\n");
+
+
+   if(alter)
+   {
+
+	for(double a_corr = -2.0; a_corr < 2.1; a_corr += 1.0)
+	{
+		double a_weigh = 1.0 + fabs(a_corr)*0.25;
+//		printf("a_corr = %.2f\r", a_corr); fflush(stdout);
+		int a_corr_i = a_corr/360.0 * 4294967296.0;
+		aft_corr.angle = aft.angle + a_corr_i;
+		for(int x_corr = -200; x_corr < 201; x_corr += 40)
+		{
+			double x_weigh = 1.0 + 0.5*((double)sq(x_corr))/40000.0;
+			aft_corr.x = aft.x + x_corr;
+			for(int y_corr = -200; y_corr < 201; y_corr += 40)
+			{
+				double y_weigh = 1.0 + 0.5*((double)sq(y_corr))/40000.0;
+				aft_corr.y = aft.y + y_corr;
+				q_scan_to_2d(&aft_corr, aft_corr_2d);
+
+				dev_matches = 0;
+				double lvl = q_calc_match_lvl(bef2d, aft_corr_2d, points1, 40.0);
+				lvl = lvl * a_weigh * x_weigh * y_weigh;
+				fprintf(f_csv, "%.2f,%d,%d,%.3f,%d\n", a_corr, x_corr, y_corr, lvl, dev_matches);
+				if(lvl < smallest_lvl)
+				{
+					smallest_lvl = lvl;
+					best_a = a_corr;
+					best_x = x_corr;
+					best_y = y_corr;
+				}
+			}
+		}
+	}
+
+	if(smallest_lvl > 1000000.0)
+	{
+		printf("Cannot correct.\n");
+		best_a = 0; best_x = 0; best_y = 0;
+		goto SKIP_CORRECT;
+	}
+
+	printf("Best correction: a = %.2f, x = %d, y = %d\n", best_a, best_x, best_y);
+
+	double first_a = best_a;
+	int first_x = best_x;
+	int first_y = best_y;
+
+	for(double a_corr = first_a-1.25; a_corr < first_a+1.26; a_corr += 0.25)
+	{
+//		printf("a_corr = %.2f\r", a_corr); fflush(stdout);
+		int a_corr_i = a_corr/360.0 * 4294967296.0;
+		aft_corr.angle = aft.angle + a_corr_i;
+		for(int x_corr = first_x-40; x_corr < first_x+41; x_corr += 10)
+		{
+			aft_corr.x = aft.x + x_corr;
+			for(int y_corr = first_y-40; y_corr < first_y+41; y_corr += 10)
+			{
+				aft_corr.y = aft.y + y_corr;
+				q_scan_to_2d(&aft_corr, aft_corr_2d);
+				double lvl = q_calc_match_lvl(bef2d, aft_corr_2d, points1, 10.0);
+				fprintf(f_csv, "%.2f,%d,%d,%.3f\n", a_corr, x_corr, y_corr, lvl);
+				if(lvl < smallest_lvl)
+				{
+					smallest_lvl = lvl;
+					best_a = a_corr;
+					best_x = x_corr;
+					best_y = y_corr;
+				}
+			}
+		}
+	}
+
+	printf("    Best correction: a = %.2f, x = %d, y = %d\n", best_a, best_x, best_y);
+
+	first_a = best_a;
+	first_x = best_x;
+	first_y = best_y;
+
+	for(double a_corr = first_a-0.4; a_corr < first_a+0.41; a_corr += 0.1)
+	{
+		int a_corr_i = a_corr/360.0 * 4294967296.0;
+		aft_corr.angle = aft.angle + a_corr_i;
+		for(int x_corr = first_x-10; x_corr < first_x+11; x_corr += 5)
+		{
+			aft_corr.x = aft.x + x_corr;
+			for(int y_corr = first_y-10; y_corr < first_y+11; y_corr += 5)
+			{
+				aft_corr.y = aft.y + y_corr;
+				q_scan_to_2d(&aft_corr, aft_corr_2d);
+				double lvl = q_calc_match_lvl(bef2d, aft_corr_2d, points1, 4.0);
+				fprintf(f_csv, "%.2f,%d,%d,%.3f\n", a_corr, x_corr, y_corr, lvl);
+				if(lvl < smallest_lvl)
+				{
+					smallest_lvl = lvl;
+					best_a = a_corr;
+					best_x = x_corr;
+					best_y = y_corr;
+				}
+			}
+		}
+	}
+
+	printf("        Best correction: a = %.2f, x = %d, y = %d\n", best_a, best_x, best_y);
+
+
+   }
+   else
+   {
 	for(double a_corr = -2.0; a_corr < 2.1; a_corr += 1.0)
 	{
 		double a_weigh = 1.0 + fabs(a_corr)*0.25;
@@ -454,6 +561,11 @@ int main(int argc, char** argv)
 	}
 
 	printf("        Best correction: a = %.2f, x = %d, y = %d\n", best_a, best_x, best_y);
+
+   }
+
+
+
 
 SKIP_CORRECT: ;
 	lidar_scan_t best;
