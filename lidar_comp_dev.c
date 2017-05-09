@@ -180,7 +180,55 @@ double calc_match_lvl(point_t* img1, point_t* img2, int img1_points)
 
 int dev_matches;
 int print_dbg = 0;
-double q_calc_match_lvl(point_t* img1, point_t* img2, int img1_points, double radius)
+
+/*
+
+*/
+void pre_search(point_t* img1, point_t* img2)
+{
+	int num_img1_masked = 0;
+	for(int i = 0; i < 256; i++)
+	{
+		if(!img1[i].valid) continue;
+
+		int smallest = 2000000000;
+
+		int o_min = i;
+		int o_max = i;
+
+		for(int o = 0; o < 256; o++)
+		{
+			if(!img2[o].valid) continue;
+			int dx = img2[o].x - img1[i].x;
+			int dy = img2[o].y - img1[i].y;
+			int dist = sq(dx) + sq(dy);
+//			if(dist < 300*300)
+//			{
+//			}
+			if(dist < smallest)
+			{
+				smallest = dist;
+			}
+		}
+
+		/*
+			img1 is always the same; img2 is adjusted.
+			If, without the adjustments, the nearest img2 point is very far away, it
+			will be far away even with any adjustments, and thus, does not contribute.
+			Masking it away makes the calculation significantly quicker.
+		*/
+		if(smallest > 300*300)
+		{
+			num_img1_masked++;
+			img1[i].valid = 0;
+		}
+	}
+
+	printf("pre_search: num_img1_masked=%d\n", num_img1_masked);
+
+}
+
+double q_calc_match_lvl(point_t* img1, point_t* img2)
 {
 	/*
 	For each point in the first image, search the nearest point in the second image; any valid point will do.
@@ -202,7 +250,6 @@ double q_calc_match_lvl(point_t* img1, point_t* img2, int img1_points, double ra
 		int smallest = 2000000000;
 
 		uint8_t odx = (uint8_t)((uint8_t)i - (uint8_t)65);
-		int odx_at_smallest;
 		for(int o = 0; o < 128; o++)
 		{
 			odx++;
@@ -213,8 +260,6 @@ double q_calc_match_lvl(point_t* img1, point_t* img2, int img1_points, double ra
 			if(dist < smallest)
 			{
 				smallest = dist;
-				odx_at_smallest = odx;
-				
 			}
 		}
 
@@ -234,30 +279,21 @@ double q_calc_match_lvl(point_t* img1, point_t* img2, int img1_points, double ra
 
 		double dist_scaled;
 
-		if(alter)
-		{
-			dist_scaled = 1000.0/((double)smallest+200.0); // avoid division by zero, and numbers too huge.
-			dist_sum += dist_scaled;
-		}
-		else
-		{
-			dist_scaled = sqrt((double)smallest);
-			dist_sum += sqrt(dist_scaled);
-		}
+		// Divider offset:
+		// 50 breaks the results down
+		// 100 seems to be nearly identical to 200, which is fine
+		// 400 is again nearly identical to 200. More careful in the most difficult case (undercorrects instead of overcorrection)
+		// 800 is like again like 200 and 400, but shows very slight improvement in one image of the 20.
+		// 1600 gets the difficult one most right so far!
+		// 3200 shows very, very small degradation in trivial cases - slight undercorrection. Still very good.
+		// 6400: about the same.
 
-		if(print_dbg)
-			printf("i = %3d  smallest_odx = %3d  dist=%6.0f  scaled=%f\n", i, odx_at_smallest, sqrt((double)smallest), dist_scaled);
+		dist_scaled = 1000.0/((double)smallest+1600.0); // avoid division by zero, and numbers too huge.
+		dist_sum += dist_scaled;
 
 	}
 
-	if(print_dbg)
-		printf("sum = %f\n", dist_sum);
-
-
-	if(alter)
-		return -1*dist_sum; // reciprocal function makes larger -> better; invert the sign so that the simple comparison later works!
-	else
-		return dist_sum;
+	return -1*dist_sum; // reciprocal function makes larger -> better; invert the sign so that the simple comparison later works!
 }
 
 
@@ -335,6 +371,8 @@ int main(int argc, char** argv)
 		}
 	}
 
+	if(alter)
+		pre_search(bef2d, aft2d);
 
 	int points1 = q_num_points(bef2d);
 	int points2 = q_num_points(aft2d);
@@ -367,21 +405,21 @@ int main(int argc, char** argv)
 
 	for(double a_corr = -2.0; a_corr < 2.1; a_corr += 1.0)
 	{
-		double a_weigh = 1.0 + (alter?-1.0:1.0)*fabs(a_corr)*0.125;
+		double a_weigh = 1.0 - fabs(a_corr)*0.125;
 		int a_corr_i = a_corr/360.0 * 4294967296.0;
 		aft_corr.angle = aft.angle + a_corr_i;
 		for(int x_corr = -200; x_corr < 201; x_corr += 40)
 		{
-			double x_weigh = 1.0 + (alter?-1.0:1.0)*0.25*((double)sq(x_corr))/40000.0;
+			double x_weigh = 1.0 - 0.25*((double)sq(x_corr))/40000.0;
 			aft_corr.x = aft.x + x_corr;
 			for(int y_corr = -200; y_corr < 201; y_corr += 40)
 			{
-				double y_weigh = 1.0 + (alter?-1.0:1.0)*0.25*((double)sq(y_corr))/40000.0;
+				double y_weigh = 1.0 - 0.25*((double)sq(y_corr))/40000.0;
 				aft_corr.y = aft.y + y_corr;
 				q_scan_to_2d(&aft_corr, aft_corr_2d);
 
 				dev_matches = 0;
-				double lvl = q_calc_match_lvl(bef2d, aft_corr_2d, points1, 40.0);
+				double lvl = q_calc_match_lvl(bef2d, aft_corr_2d);
 //				printf("lvl=%f  aw=%f  xw=%f  yw=%f  ", lvl, a_weigh, x_weigh, y_weigh);
 				lvl = lvl * a_weigh * x_weigh * y_weigh;
 //				printf("->lvl=%f\n", lvl);
@@ -404,7 +442,7 @@ int main(int argc, char** argv)
 		goto SKIP_CORRECT;
 	}
 
-	printf("Best correction: a = %.2f, x = %d, y = %d\n", best_a, best_x, best_y);
+	//printf("Best correction: a = %.2f, x = %d, y = %d\n", best_a, best_x, best_y);
 
 	double first_a = best_a;
 	int first_x = best_x;
@@ -421,7 +459,7 @@ int main(int argc, char** argv)
 			{
 				aft_corr.y = aft.y + y_corr;
 				q_scan_to_2d(&aft_corr, aft_corr_2d);
-				double lvl = q_calc_match_lvl(bef2d, aft_corr_2d, points1, 10.0);
+				double lvl = q_calc_match_lvl(bef2d, aft_corr_2d);
 				fprintf(f_csv, "%.2f,%d,%d,%.3f\n", a_corr, x_corr, y_corr, lvl);
 				if(lvl < smallest_lvl)
 				{
@@ -434,7 +472,7 @@ int main(int argc, char** argv)
 		}
 	}
 
-	printf("    Best correction: a = %.2f, x = %d, y = %d\n", best_a, best_x, best_y);
+	//printf("    Best correction: a = %.2f, x = %d, y = %d\n", best_a, best_x, best_y);
 
 	first_a = best_a;
 	first_x = best_x;
@@ -451,7 +489,7 @@ int main(int argc, char** argv)
 			{
 				aft_corr.y = aft.y + y_corr;
 				q_scan_to_2d(&aft_corr, aft_corr_2d);
-				double lvl = q_calc_match_lvl(bef2d, aft_corr_2d, points1, 4.0);
+				double lvl = q_calc_match_lvl(bef2d, aft_corr_2d);
 				fprintf(f_csv, "%.2f,%d,%d,%.3f\n", a_corr, x_corr, y_corr, lvl);
 				if(lvl < smallest_lvl)
 				{
@@ -479,7 +517,7 @@ SKIP_CORRECT: ;
 
 //	print_dbg = 1;
 //	q_scan_to_2d(&best, aft_corr_2d);
-//	q_calc_match_lvl(bef2d, aft_corr_2d, points1, 40.0);
+//	q_calc_match_lvl(bef2d, aft_corr_2d);
 
 	write_lidar(f_aft_out, &best);
 
