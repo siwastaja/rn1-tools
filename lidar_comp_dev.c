@@ -18,6 +18,10 @@ LIDAR based location/angular error correction
 #define SIN_LUT_SHIFT (32-SIN_LUT_BITS)
 extern const int16_t sin_lut[SIN_LUT_POINTS];
 
+
+int alter = 0; // Run alternative algorithm version for side-to-side comparison
+
+
 typedef struct
 {
 	int32_t angle;
@@ -41,7 +45,7 @@ point_t bef2d[360];
 point_t bonus2d[360];
 point_t aft2d[360];
 
-#define LIDAR_RANGE 4500
+#define LIDAR_RANGE 5000
 
 #define sq(x) ((x)*(x))
 
@@ -211,17 +215,36 @@ double q_calc_match_lvl(point_t* img1, point_t* img2, int img1_points, double ra
 			}
 		}
 
-		double dist_scaled = /*sqrt(sqrt(*/(double)smallest;//));
-		if(dist_scaled < radius*radius)
+		double dist_scaled;
+
+		if(alter)
 		{
-			dist_sum += dist_scaled;
+			dist_scaled = sqrt((double)smallest);
+
+			dist_sum += sqrt(dist_scaled);
 			matches++;
+
+		}
+		else
+		{
+			dist_scaled = (double)smallest;
+
+			if(dist_scaled < radius*radius)
+			{
+				dist_sum += dist_scaled;
+				matches++;
+			}
+
 		}
 	}
 
 	dev_matches = matches;
-	if(matches < 30) return 999999999999999999999.9;
-	dist_sum /= (double)(matches/**matches*/);
+	if(matches < 50) return 999999999999999999999.9;
+	if(alter)
+		dist_sum /= (double)(matches);
+	else
+		dist_sum /= (double)(matches*matches);
+
 	return dist_sum;
 
 //	if(matches == 0) return 999999999999.9;
@@ -251,10 +274,13 @@ void write_lidar(FILE* f, lidar_scan_t* l)
 
 int main(int argc, char** argv)
 {
+	if(argc>1 && argv[1][0] == 'a')
+		alter = 1;
+	
 	FILE* f_bef_in     = fopen("lidar_before_in", "r");
 	FILE* f_aft_in     = fopen("lidar_after_in", "r");
 	FILE* f_csv        = fopen("log.csv", "w");
-	FILE* f_aft_out    = fopen("lidar_after_out", "w");
+	FILE* f_aft_out    = fopen(alter?"lidar_after_out_alt":"lidar_after_out", "w");
 
 	if(!f_bef_in) {printf("Error opening lidar_before_in for read\n"); return 1;}
 	if(!f_aft_in) {printf("Error opening lidar_after_in for read\n"); return 1;}
@@ -279,17 +305,24 @@ int main(int argc, char** argv)
 	LIDAR_RANGE must be slightly smaller than in real life, since we are assuming zero error in robot coordinates.
 	*/
 
-	for(int i = 0; i < 360; i++)
+//	for(int i = 0; i < 360; i++) // IF NOT q
+	for(int i = 0; i < 256; i++) // IF q
 	{
-		if(sqrt(sq((double)(bef2d[i].x - aft.x)) + sq((double)(bef2d[i].y - aft.y))) > LIDAR_RANGE)
+		double dist_befpoint_to_aft_origin = sqrt(sq((double)(bef2d[i].x - aft.x)) + sq((double)(bef2d[i].y - aft.y)));
+		double dist_aftpoint_to_bef_origin = sqrt(sq((double)(aft2d[i].x - bef.x)) + sq((double)(aft2d[i].y - bef.y)));
+
+//		if(bef.scan[i] != 0)
+//			printf("i=%d, x=%d, y=%d, dist=%.0f\n", i, bef2d[i].x, bef2d[i].y, dist_befpoint_to_aft_origin);
+
+		if(dist_befpoint_to_aft_origin > LIDAR_RANGE)
 		{
 			bef2d[i].valid = 0;
-			bef.scan[i] = 0;
+//			bef.scan[i] = 0;
 		}
-		if(sqrt(sq((double)(aft2d[i].x - bef.x)) + sq((double)(aft2d[i].y - bef.y))) > LIDAR_RANGE)
+		if(dist_aftpoint_to_bef_origin > LIDAR_RANGE)
 		{
 			aft2d[i].valid = 0;
-			aft.scan[i] = 0;
+//			aft.scan[i] = 0;
 		}
 	}
 
@@ -323,19 +356,23 @@ int main(int argc, char** argv)
 	fprintf(f_csv, "a,x,y,lvl,n_matches\n");
 	for(double a_corr = -2.0; a_corr < 2.1; a_corr += 1.0)
 	{
-		printf("a_corr = %.2f\r", a_corr); fflush(stdout);
+		double a_weigh = 1.0 + fabs(a_corr)*0.25;
+//		printf("a_corr = %.2f\r", a_corr); fflush(stdout);
 		int a_corr_i = a_corr/360.0 * 4294967296.0;
 		aft_corr.angle = aft.angle + a_corr_i;
 		for(int x_corr = -200; x_corr < 200; x_corr += 20)
 		{
+			double x_weigh = 1.0 + 0.5*((double)sq(x_corr))/40000.0;
 			aft_corr.x = aft.x + x_corr;
 			for(int y_corr = -200; y_corr < 200; y_corr += 20)
 			{
+				double y_weigh = 1.0 + 0.5*((double)sq(y_corr))/40000.0;
 				aft_corr.y = aft.y + y_corr;
 				q_scan_to_2d(&aft_corr, aft_corr_2d);
 
 				dev_matches = 0;
 				double lvl = q_calc_match_lvl(bef2d, aft_corr_2d, points1, 40.0);
+				lvl = lvl * a_weigh * x_weigh * y_weigh;
 				fprintf(f_csv, "%.2f,%d,%d,%.3f,%d\n", a_corr, x_corr, y_corr, lvl, dev_matches);
 				if(lvl < smallest_lvl)
 				{
@@ -355,7 +392,7 @@ int main(int argc, char** argv)
 		goto SKIP_CORRECT;
 	}
 
-	printf("\nBest correction: a = %.2f, x = %d, y = %d\n", best_a, best_x, best_y);
+	printf("Best correction: a = %.2f, x = %d, y = %d\n", best_a, best_x, best_y);
 
 	double first_a = best_a;
 	int first_x = best_x;
@@ -363,7 +400,7 @@ int main(int argc, char** argv)
 
 	for(double a_corr = first_a-1.25; a_corr < first_a+1.26; a_corr += 0.25)
 	{
-		printf("a_corr = %.2f\r", a_corr); fflush(stdout);
+//		printf("a_corr = %.2f\r", a_corr); fflush(stdout);
 		int a_corr_i = a_corr/360.0 * 4294967296.0;
 		aft_corr.angle = aft.angle + a_corr_i;
 		for(int x_corr = first_x-25; x_corr < first_x+26; x_corr += 5)
@@ -386,7 +423,7 @@ int main(int argc, char** argv)
 		}
 	}
 
-	printf("\nBest correction: a = %.2f, x = %d, y = %d\n", best_a, best_x, best_y);
+	printf("    Best correction: a = %.2f, x = %d, y = %d\n", best_a, best_x, best_y);
 
 	first_a = best_a;
 	first_x = best_x;
@@ -394,7 +431,6 @@ int main(int argc, char** argv)
 
 	for(double a_corr = first_a-0.4; a_corr < first_a+0.41; a_corr += 0.1)
 	{
-		printf("a_corr = %.2f\r", a_corr); fflush(stdout);
 		int a_corr_i = a_corr/360.0 * 4294967296.0;
 		aft_corr.angle = aft.angle + a_corr_i;
 		for(int x_corr = first_x-8; x_corr < first_x+9; x_corr += 2)
@@ -417,7 +453,7 @@ int main(int argc, char** argv)
 		}
 	}
 
-	printf("\nBest correction: a = %.2f, x = %d, y = %d\n", best_a, best_x, best_y);
+	printf("        Best correction: a = %.2f, x = %d, y = %d\n", best_a, best_x, best_y);
 
 SKIP_CORRECT: ;
 	lidar_scan_t best;
