@@ -559,6 +559,7 @@ int main(int argc, char** argv)
 	uint8_t parsebuf[1024];
 	int do_parse = 0;
 	int rxloc = 0;
+	int focus = 1;
 
 	internal_txbuf[0] = 0; // Start all UDP packets with 0; others are messages meant to the udpserver only.
 	txbuf = &internal_txbuf[1];
@@ -650,278 +651,287 @@ int main(int argc, char** argv)
 		{
 			if(event.type == sf::Event::Closed)
 				win.close();
+
+			if(event.type == sf::Event::LostFocus)
+				focus = 0;
+
+			if(event.type == sf::Event::GainedFocus)
+				focus = 1;
+			
 		}
 
-		if(sf::Keyboard::isKeyPressed(sf::Keyboard::PageUp))
+		if(focus)
 		{
-			mm_per_pixel *= 1.05;
-			origin_x *= 1.05;
-			origin_y *= 1.05;
-//			origin_x = ((double)screen_x/2.0)*mm_per_pixel;
-//			origin_y = ((double)screen_y/2.0)*mm_per_pixel;
-		}
-		if(sf::Keyboard::isKeyPressed(sf::Keyboard::PageDown))
-		{
-			mm_per_pixel *= 0.95;
-			origin_x *= 0.95;
-			origin_y *= 0.95;
-//			origin_x = ((double)screen_x/2.0)*mm_per_pixel;
-//			origin_y = ((double)screen_y/2.0)*mm_per_pixel;
-		}
-
-		if(sf::Keyboard::isKeyPressed(sf::Keyboard::F5))
-		{
-			uint8_t sub[2] = {123, sf::Keyboard::isKeyPressed(sf::Keyboard::LShift)?0xbb:0xaa};
-			if(udpsock.send(sub, 2, serv_ip, serv_port) != sf::Socket::Done)
+			if(sf::Keyboard::isKeyPressed(sf::Keyboard::PageUp))
 			{
-				printf("UDP send error.\n");
+				mm_per_pixel *= 1.05;
+				origin_x *= 1.05;
+				origin_y *= 1.05;
+	//			origin_x = ((double)screen_x/2.0)*mm_per_pixel;
+	//			origin_y = ((double)screen_y/2.0)*mm_per_pixel;
 			}
-		}
-
-		if(sf::Keyboard::isKeyPressed(sf::Keyboard::F6))
-		{
-			txbuf[0] = sf::Keyboard::isKeyPressed(sf::Keyboard::LShift)?0xd2:0xd1;
-			txbuf[1] = 0;
-			txbuf[2] = 0xff;
-			snd(3);
-		}
-
-		if(manual_control)
-		{
-			if(sf::Keyboard::isKeyPressed(sf::Keyboard::A))
+			if(sf::Keyboard::isKeyPressed(sf::Keyboard::PageDown))
 			{
-				angle_cmd += 1;
-				if(angle_cmd > 3)
-					angle_cmd = 3;
-			}
-			else if(sf::Keyboard::isKeyPressed(sf::Keyboard::Left))
-			{
-				angle_cmd += 2;
-				if(angle_cmd > 15)
-					angle_cmd = 15;
-			}
-			else
-			{
-				if(angle_cmd > 0) angle_cmd--;
-			}
-			if(sf::Keyboard::isKeyPressed(sf::Keyboard::D))
-			{
-				angle_cmd -= 1;
-				if(angle_cmd < -3)
-					angle_cmd = -3;
-			}
-			else if(sf::Keyboard::isKeyPressed(sf::Keyboard::Right))
-			{
-				angle_cmd -= 2;
-				if(angle_cmd < -15)
-					angle_cmd = -15;
-			}
-			else
-			{
-				if(angle_cmd < 0) angle_cmd++;
-			}
-			if(sf::Keyboard::isKeyPressed(sf::Keyboard::Up))
-			{
-				speed += 2;
-				if(sf::Keyboard::isKeyPressed(sf::Keyboard::LShift))
-				{ if(speed > 63) speed = 63; } else { if(speed > 40) speed = 40; }
-			}
-			if(sf::Keyboard::isKeyPressed(sf::Keyboard::Down))
-			{
-				speed -= 2;
-				if(speed < -40) speed = -40;
-			}
-			if(sf::Keyboard::isKeyPressed(sf::Keyboard::W))
-			{
-				speed += 2;
-				if(speed > 15) speed = 15;
-			}
-			if(sf::Keyboard::isKeyPressed(sf::Keyboard::S))
-			{
-				speed -= 2;
-				if(speed < -15) speed = -15;
+				mm_per_pixel *= 0.95;
+				origin_x *= 0.95;
+				origin_y *= 0.95;
+	//			origin_x = ((double)screen_x/2.0)*mm_per_pixel;
+	//			origin_y = ((double)screen_y/2.0)*mm_per_pixel;
 			}
 
-
-		}
-		else // automatic control
-		{
-			sf::Vector2i localPosition = sf::Mouse::getPosition(win);
-			double click_x = (localPosition.x * mm_per_pixel) - origin_x - cur_x;
-			double click_y = (localPosition.y * mm_per_pixel) - origin_y - cur_y;
-			if(sf::Mouse::isButtonPressed(sf::Mouse::Left))
+			if(sf::Keyboard::isKeyPressed(sf::Keyboard::F5))
 			{
-					auto_angle = -1* ((360.0/(2*M_PI)*atan2(click_x, click_y)) + cur_angle - 90 - north_corr);
-					auto_fwd = sqrt(click_x*click_x + click_y*click_y);
-					if(auto_angle < -180) auto_angle += 360;
-					else if(auto_angle > 180) auto_angle -= 360;
-					if(auto_angle < -180) auto_angle += 360;
-					else if(auto_angle > 180) auto_angle -= 360;
-			}
-			else if(sf::Mouse::isButtonPressed(sf::Mouse::Right))
-			{
-					auto_angle = -1* ((360.0/(2*M_PI)*atan2(click_x, click_y)) + cur_angle + 90 - north_corr);
-					auto_fwd = -1 * sqrt(click_x*click_x + click_y*click_y);
-					if(auto_angle < -180) auto_angle += 360;
-					else if(auto_angle > 180) auto_angle -= 360;
-					if(auto_angle < -180) auto_angle += 360;
-					else if(auto_angle > 180) auto_angle -= 360;
-			}
-
-
-			if(sf::Keyboard::isKeyPressed(sf::Keyboard::Left))
-			{
-				if(sf::Keyboard::isKeyPressed(sf::Keyboard::RShift))
+				uint8_t sub[2] = {123, sf::Keyboard::isKeyPressed(sf::Keyboard::LShift)?0xbb:0xaa};
+				if(udpsock.send(sub, 2, serv_ip, serv_port) != sf::Socket::Done)
 				{
-					double fauto = -90/360.0*65536.0;
-					int iauto = fauto;
-					txbuf[0] = 0x81;
-					txbuf[1] = I16_MS(iauto);
-					txbuf[2] = I16_LS(iauto);
-					txbuf[3] = 0;
-					txbuf[4] = 0;
-					txbuf[5] = 0xff;
-					snd(6);
+					printf("UDP send error.\n");
+				}
+			}
+
+			if(sf::Keyboard::isKeyPressed(sf::Keyboard::F6))
+			{
+				txbuf[0] = sf::Keyboard::isKeyPressed(sf::Keyboard::LShift)?0xd2:0xd1;
+				txbuf[1] = 0;
+				txbuf[2] = 0xff;
+				snd(3);
+			}
+
+			if(manual_control)
+			{
+				if(sf::Keyboard::isKeyPressed(sf::Keyboard::A))
+				{
+					angle_cmd += 1;
+					if(angle_cmd > 3)
+						angle_cmd = 3;
+				}
+				else if(sf::Keyboard::isKeyPressed(sf::Keyboard::Left))
+				{
+					angle_cmd += 2;
+					if(angle_cmd > 15)
+						angle_cmd = 15;
 				}
 				else
-					origin_x -= 20.0;
-			}
-			if(sf::Keyboard::isKeyPressed(sf::Keyboard::Right))
-			{
-				if(sf::Keyboard::isKeyPressed(sf::Keyboard::RShift))
 				{
-					double fauto = 90/360.0*65536.0;
-					int iauto = fauto;
-					txbuf[0] = 0x81;
-					txbuf[1] = I16_MS(iauto);
-					txbuf[2] = I16_LS(iauto);
-					txbuf[3] = 0;
-					txbuf[4] = 0;
-					txbuf[5] = 0xff;
-					snd(6);
-
+					if(angle_cmd > 0) angle_cmd--;
+				}
+				if(sf::Keyboard::isKeyPressed(sf::Keyboard::D))
+				{
+					angle_cmd -= 1;
+					if(angle_cmd < -3)
+						angle_cmd = -3;
+				}
+				else if(sf::Keyboard::isKeyPressed(sf::Keyboard::Right))
+				{
+					angle_cmd -= 2;
+					if(angle_cmd < -15)
+						angle_cmd = -15;
 				}
 				else
-					origin_x += 20.0;
-			}
-			if(sf::Keyboard::isKeyPressed(sf::Keyboard::Up))
-			{
-				origin_y -= 20.0;
-			}
-			if(sf::Keyboard::isKeyPressed(sf::Keyboard::Down))
-			{
-				origin_y += 20.0;
-			}
-			if(sf::Keyboard::isKeyPressed(sf::Keyboard::Return))
-			{
-				if(!return_pressed)
 				{
-					double fauto = auto_angle/360.0*65536.0;
-					int iauto = fauto;
-					return_pressed = 1;
-					txbuf[0] = 0x81;
-					txbuf[1] = I16_MS(iauto);
-					txbuf[2] = I16_LS(iauto);
-					txbuf[3] = I16_MS(auto_fwd);
-					txbuf[4] = I16_LS(auto_fwd);
-					txbuf[5] = 0xff;
-					snd(6);
-					auto_angle = 0;
-					auto_fwd = 0;
+					if(angle_cmd < 0) angle_cmd++;
 				}
-			}
-			else
-			{
-				return_pressed = 0;
-			}
-
-			if(sf::Keyboard::isKeyPressed(sf::Keyboard::C))
-			{
-				if(!c_pressed)
+				if(sf::Keyboard::isKeyPressed(sf::Keyboard::Up))
 				{
+					speed += 2;
 					if(sf::Keyboard::isKeyPressed(sf::Keyboard::LShift))
-						txbuf[0] = 0x92;
+					{ if(speed > 63) speed = 63; } else { if(speed > 40) speed = 40; }
+				}
+				if(sf::Keyboard::isKeyPressed(sf::Keyboard::Down))
+				{
+					speed -= 2;
+					if(speed < -40) speed = -40;
+				}
+				if(sf::Keyboard::isKeyPressed(sf::Keyboard::W))
+				{
+					speed += 2;
+					if(speed > 15) speed = 15;
+				}
+				if(sf::Keyboard::isKeyPressed(sf::Keyboard::S))
+				{
+					speed -= 2;
+					if(speed < -15) speed = -15;
+				}
+
+
+			}
+			else // automatic control
+			{
+				sf::Vector2i localPosition = sf::Mouse::getPosition(win);
+				double click_x = (localPosition.x * mm_per_pixel) - origin_x - cur_x;
+				double click_y = (localPosition.y * mm_per_pixel) - origin_y - cur_y;
+				if(sf::Mouse::isButtonPressed(sf::Mouse::Left))
+				{
+						auto_angle = -1* ((360.0/(2*M_PI)*atan2(click_x, click_y)) + cur_angle - 90 - north_corr);
+						auto_fwd = sqrt(click_x*click_x + click_y*click_y);
+						if(auto_angle < -180) auto_angle += 360;
+						else if(auto_angle > 180) auto_angle -= 360;
+						if(auto_angle < -180) auto_angle += 360;
+						else if(auto_angle > 180) auto_angle -= 360;
+				}
+				else if(sf::Mouse::isButtonPressed(sf::Mouse::Right))
+				{
+						auto_angle = -1* ((360.0/(2*M_PI)*atan2(click_x, click_y)) + cur_angle + 90 - north_corr);
+						auto_fwd = -1 * sqrt(click_x*click_x + click_y*click_y);
+						if(auto_angle < -180) auto_angle += 360;
+						else if(auto_angle > 180) auto_angle -= 360;
+						if(auto_angle < -180) auto_angle += 360;
+						else if(auto_angle > 180) auto_angle -= 360;
+				}
+
+
+				if(sf::Keyboard::isKeyPressed(sf::Keyboard::Left))
+				{
+					if(sf::Keyboard::isKeyPressed(sf::Keyboard::RShift))
+					{
+						double fauto = -90/360.0*65536.0;
+						int iauto = fauto;
+						txbuf[0] = 0x81;
+						txbuf[1] = I16_MS(iauto);
+						txbuf[2] = I16_LS(iauto);
+						txbuf[3] = 0;
+						txbuf[4] = 0;
+						txbuf[5] = 0xff;
+						snd(6);
+					}
 					else
-						txbuf[0] = 0x91;
-					txbuf[1] = 0;
-					txbuf[2] = 0xff;
-					snd(3);
+						origin_x -= 20.0;
+				}
+				if(sf::Keyboard::isKeyPressed(sf::Keyboard::Right))
+				{
+					if(sf::Keyboard::isKeyPressed(sf::Keyboard::RShift))
+					{
+						double fauto = 90/360.0*65536.0;
+						int iauto = fauto;
+						txbuf[0] = 0x81;
+						txbuf[1] = I16_MS(iauto);
+						txbuf[2] = I16_LS(iauto);
+						txbuf[3] = 0;
+						txbuf[4] = 0;
+						txbuf[5] = 0xff;
+						snd(6);
+
+					}
+					else
+						origin_x += 20.0;
+				}
+				if(sf::Keyboard::isKeyPressed(sf::Keyboard::Up))
+				{
+					origin_y -= 20.0;
+				}
+				if(sf::Keyboard::isKeyPressed(sf::Keyboard::Down))
+				{
+					origin_y += 20.0;
+				}
+				if(sf::Keyboard::isKeyPressed(sf::Keyboard::Return))
+				{
+					if(!return_pressed)
+					{
+						double fauto = auto_angle/360.0*65536.0;
+						int iauto = fauto;
+						return_pressed = 1;
+						txbuf[0] = 0x81;
+						txbuf[1] = I16_MS(iauto);
+						txbuf[2] = I16_LS(iauto);
+						txbuf[3] = I16_MS(auto_fwd);
+						txbuf[4] = I16_LS(auto_fwd);
+						txbuf[5] = 0xff;
+						snd(6);
+						auto_angle = 0;
+						auto_fwd = 0;
+					}
+				}
+				else
+				{
+					return_pressed = 0;
+				}
+
+				if(sf::Keyboard::isKeyPressed(sf::Keyboard::C))
+				{
+					if(!c_pressed)
+					{
+						if(sf::Keyboard::isKeyPressed(sf::Keyboard::LShift))
+							txbuf[0] = 0x92;
+						else
+							txbuf[0] = 0x91;
+						txbuf[1] = 0;
+						txbuf[2] = 0xff;
+						snd(3);
+					}
+				}
+				else
+				{
+					c_pressed = 0;
+				}
+
+
+			}
+
+
+			if(sf::Keyboard::isKeyPressed(sf::Keyboard::F1))
+			{
+				north_corr-=1.0;
+			}
+			if(sf::Keyboard::isKeyPressed(sf::Keyboard::F2))
+			{
+				north_corr+=1.0;
+			}
+			if(sf::Keyboard::isKeyPressed(sf::Keyboard::F3))
+			{
+				if(sf::Keyboard::isKeyPressed(sf::Keyboard::LShift))
+					txbuf[0] = 0xd3;
+				else
+					txbuf[0] = 0xd1;
+				txbuf[1] = 0x01;
+				txbuf[2] = 0xff;
+				snd(3);
+			}
+			if(sf::Keyboard::isKeyPressed(sf::Keyboard::F4))
+			{
+				if(sf::Keyboard::isKeyPressed(sf::Keyboard::LShift))
+					txbuf[0] = 0xd4;
+				else
+					txbuf[0] = 0xd2;
+				txbuf[1] = 0x01;
+				txbuf[2] = 0xff;
+				snd(3);
+			}
+			if(sf::Keyboard::isKeyPressed(sf::Keyboard::F10))
+			{
+				manual_control = 1;
+				control_on = 0;
+			}
+			if(sf::Keyboard::isKeyPressed(sf::Keyboard::F11))
+			{
+				manual_control = 1;
+				control_on = 1;
+			}
+			if(sf::Keyboard::isKeyPressed(sf::Keyboard::F12))
+			{
+				manual_control = 0;
+				control_on = 1;
+			}
+			if(sf::Keyboard::isKeyPressed(sf::Keyboard::F8))
+			{
+				save_lidars = 2;
+			}
+			if(sf::Keyboard::isKeyPressed(sf::Keyboard::F9))
+			{
+				if(!f9_pressed)
+				{
+					f9_pressed = 1;
+					FILE *f1 = fopen("lidar_before_in", "r");
+					FILE *f2 = fopen("lidar_after_in", "r");
+					FILE *f3 = fopen("lidar_after_out", "r");
+					if(!f1) printf("Can't open f1\n"); else read_lidar(f1, &dev_lidar_bef_in);
+					if(!f2) printf("Can't open f2\n"); else read_lidar(f2, &dev_lidar_aft_in);
+					if(!f3) printf("Can't open f3\n"); else read_lidar(f3, &dev_lidar_aft_out);
+					dev_show_lidars = 1;
+					fclose(f1); fclose(f2); fclose(f3);
 				}
 			}
 			else
-			{
-				c_pressed = 0;
-			}
-
-
-		}
-
-
-		if(sf::Keyboard::isKeyPressed(sf::Keyboard::F1))
-		{
-			north_corr-=1.0;
-		}
-		if(sf::Keyboard::isKeyPressed(sf::Keyboard::F2))
-		{
-			north_corr+=1.0;
-		}
-		if(sf::Keyboard::isKeyPressed(sf::Keyboard::F3))
-		{
-			if(sf::Keyboard::isKeyPressed(sf::Keyboard::LShift))
-				txbuf[0] = 0xd3;
-			else
-				txbuf[0] = 0xd1;
-			txbuf[1] = 0x01;
-			txbuf[2] = 0xff;
-			snd(3);
-		}
-		if(sf::Keyboard::isKeyPressed(sf::Keyboard::F4))
-		{
-			if(sf::Keyboard::isKeyPressed(sf::Keyboard::LShift))
-				txbuf[0] = 0xd4;
-			else
-				txbuf[0] = 0xd2;
-			txbuf[1] = 0x01;
-			txbuf[2] = 0xff;
-			snd(3);
-		}
-		if(sf::Keyboard::isKeyPressed(sf::Keyboard::F10))
-		{
-			manual_control = 1;
-			control_on = 0;
-		}
-		if(sf::Keyboard::isKeyPressed(sf::Keyboard::F11))
-		{
-			manual_control = 1;
-			control_on = 1;
-		}
-		if(sf::Keyboard::isKeyPressed(sf::Keyboard::F12))
-		{
-			manual_control = 0;
-			control_on = 1;
-		}
-		if(sf::Keyboard::isKeyPressed(sf::Keyboard::F8))
-		{
-			save_lidars = 2;
-		}
-		if(sf::Keyboard::isKeyPressed(sf::Keyboard::F9))
-		{
-			if(!f9_pressed)
-			{
-				f9_pressed = 1;
-				FILE *f1 = fopen("lidar_before_in", "r");
-				FILE *f2 = fopen("lidar_after_in", "r");
-				FILE *f3 = fopen("lidar_after_out", "r");
-				if(!f1) printf("Can't open f1\n"); else read_lidar(f1, &dev_lidar_bef_in);
-				if(!f2) printf("Can't open f2\n"); else read_lidar(f2, &dev_lidar_aft_in);
-				if(!f3) printf("Can't open f3\n"); else read_lidar(f3, &dev_lidar_aft_out);
-				dev_show_lidars = 1;
-				fclose(f1); fclose(f2); fclose(f3);
-			}
-		}
-		else
-			f9_pressed = 0;
-
+				f9_pressed = 0;
+		} // end if(focus)
 
 		win.clear(sf::Color(180,220,255));
 
