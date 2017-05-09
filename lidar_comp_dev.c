@@ -178,14 +178,18 @@ double calc_match_lvl(point_t* img1, point_t* img2, int img1_points)
 	return dist_sum;
 }
 
-int dev_matches;
 int print_dbg = 0;
+
+int range_opts_valid = 0;
+uint8_t o_starts[256];
+uint8_t o_ranges[256];
 
 /*
 
 */
 void pre_search(point_t* img1, point_t* img2)
 {
+	int num_opers = 0;
 	int num_img1_masked = 0;
 	for(int i = 0; i < 256; i++)
 	{
@@ -193,8 +197,8 @@ void pre_search(point_t* img1, point_t* img2)
 
 		int smallest = 2000000000;
 
-		int o_min = i;
-		int o_max = i;
+		int o_smallest = 1000;
+		int o_biggest = -1000;
 
 		for(int o = 0; o < 256; o++)
 		{
@@ -202,13 +206,43 @@ void pre_search(point_t* img1, point_t* img2)
 			int dx = img2[o].x - img1[i].x;
 			int dy = img2[o].y - img1[i].y;
 			int dist = sq(dx) + sq(dy);
-//			if(dist < 300*300)
-//			{
-//			}
+
+			/*
+				We want to log minimum and maximum o index so that we can only scan the relevant possible area.
+			*/
+			if(dist < 300*300)
+			{
+				int o_aligned = (o<128)?o:o-256; // We want to have negative numbers from the high range, so that looking for min/max works.
+//				printf("i=%d  o=%d  o_aligned=%d\n", i, o, o_aligned);
+
+				if(o_aligned < o_smallest) o_smallest = o_aligned;
+				if(o_aligned > o_biggest) o_biggest = o_aligned;
+			}
+
 			if(dist < smallest)
 			{
 				smallest = dist;
 			}
+		}
+
+		if(o_smallest == 1000) // not found
+		{
+			num_img1_masked++;
+			img1[i].valid = 0;
+			o_ranges[i] = 255;
+//			printf("i=%d  ALL POINTS FAR AWAY -> valid=0\n", i);
+		}
+		else
+		{
+			o_smallest -= 2;
+			int o_range = o_biggest-o_smallest+2;
+//			printf("i=%d, o_smallest=%d -> %d, o_biggest=%d -> %d, o_range=%d\n", i, o_smallest, o_smallest<0?o_smallest+256:o_smallest, o_biggest, o_biggest<0?o_biggest+256:o_biggest, o_range);
+
+			if(o_smallest < 0) o_smallest+=256;
+			o_starts[i] = o_smallest;
+			o_ranges[i] = o_range;
+
+			num_opers += o_range;
 		}
 
 		/*
@@ -217,15 +251,16 @@ void pre_search(point_t* img1, point_t* img2)
 			will be far away even with any adjustments, and thus, does not contribute.
 			Masking it away makes the calculation significantly quicker.
 		*/
-		if(smallest > 300*300)
-		{
-			num_img1_masked++;
-			img1[i].valid = 0;
-		}
+//		if(smallest > 300*300)
+//		{
+//			num_img1_masked++;
+//			img1[i].valid = 0;
+//		}
 	}
 
-	printf("pre_search: num_img1_masked=%d\n", num_img1_masked);
+	printf("pre_search: num_img1_masked=%d, num_opers=%d instead of half-optimized %d!\n", num_img1_masked, num_opers, (256-num_img1_masked)*128);
 
+	range_opts_valid = 1;
 }
 
 double q_calc_match_lvl(point_t* img1, point_t* img2)
@@ -249,17 +284,44 @@ double q_calc_match_lvl(point_t* img1, point_t* img2)
 
 		int smallest = 2000000000;
 
-		uint8_t odx = (uint8_t)((uint8_t)i - (uint8_t)65);
-		for(int o = 0; o < 128; o++)
+
+		if(range_opts_valid) // The Shit on optimization.
 		{
-			odx++;
-			if(!img2[odx].valid) continue;
-			int dx = img2[odx].x - img1[i].x;
-			int dy = img2[odx].y - img1[i].y;
-			int dist = sq(dx) + sq(dy);
-			if(dist < smallest)
+			uint8_t odx = o_starts[i];
+			int range = o_ranges[i];
+			if(range == 255)
 			{
-				smallest = dist;
+				printf("Supper failure at i=%d.\n", i);
+				return 0.0;
+			}
+			for(int o = 0; o < range; o++)
+			{
+				odx++;
+				if(!img2[odx].valid) continue;
+				int dx = img2[odx].x - img1[i].x;
+				int dy = img2[odx].y - img1[i].y;
+				int dist = sq(dx) + sq(dy);
+				if(dist < smallest)
+				{
+					smallest = dist;
+				}
+			}
+		}
+		else
+		{
+			// Basic optimization that goes through half of the data each round.
+			uint8_t odx = (uint8_t)((uint8_t)i - (uint8_t)65);
+			for(int o = 0; o < 128; o++)
+			{
+				odx++;
+				if(!img2[odx].valid) continue;
+				int dx = img2[odx].x - img1[i].x;
+				int dy = img2[odx].y - img1[i].y;
+				int dist = sq(dx) + sq(dy);
+				if(dist < smallest)
+				{
+					smallest = dist;
+				}
 			}
 		}
 
@@ -418,12 +480,11 @@ int main(int argc, char** argv)
 				aft_corr.y = aft.y + y_corr;
 				q_scan_to_2d(&aft_corr, aft_corr_2d);
 
-				dev_matches = 0;
 				double lvl = q_calc_match_lvl(bef2d, aft_corr_2d);
 //				printf("lvl=%f  aw=%f  xw=%f  yw=%f  ", lvl, a_weigh, x_weigh, y_weigh);
 				lvl = lvl * a_weigh * x_weigh * y_weigh;
 //				printf("->lvl=%f\n", lvl);
-				fprintf(f_csv, "%.2f,%d,%d,%.3f,%d\n", a_corr, x_corr, y_corr, lvl, dev_matches);
+				fprintf(f_csv, "%.2f,%d,%d,%.3f\n", a_corr, x_corr, y_corr, lvl);
 				if(lvl < smallest_lvl)
 				{
 					smallest_lvl = lvl;
