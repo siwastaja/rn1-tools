@@ -400,7 +400,7 @@ int main(int argc, char** argv)
 	int first_x = best_x;
 	int first_y = best_y;
 
-	for(double a_corr = first_a-1.25; a_corr < first_a+1.26; a_corr += 0.25)
+	for(double a_corr = first_a-1.00; a_corr < first_a+1.01; a_corr += 0.5)
 	{
 //		printf("a_corr = %.2f\r", a_corr); fflush(stdout);
 		int a_corr_i = a_corr/360.0 * 4294967296.0;
@@ -431,7 +431,7 @@ int main(int argc, char** argv)
 	first_x = best_x;
 	first_y = best_y;
 
-	for(double a_corr = first_a-0.4; a_corr < first_a+0.41; a_corr += 0.1)
+	for(double a_corr = first_a-0.5; a_corr < first_a+0.51; a_corr += 0.25)
 	{
 		int a_corr_i = a_corr/360.0 * 4294967296.0;
 		aft_corr.angle = aft.angle + a_corr_i;
