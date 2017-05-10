@@ -18,6 +18,10 @@ LIDAR based location/angular error correction
 #define SIN_LUT_SHIFT (32-SIN_LUT_BITS)
 extern const int16_t sin_lut[SIN_LUT_POINTS];
 
+
+int alter = 0; // Run alternative algorithm version for side-to-side comparison
+
+
 typedef struct
 {
 	int32_t angle;
@@ -41,7 +45,7 @@ point_t bef2d[360];
 point_t bonus2d[360];
 point_t aft2d[360];
 
-#define LIDAR_RANGE 4500
+#define LIDAR_RANGE 5000
 
 #define sq(x) ((x)*(x))
 
@@ -174,8 +178,92 @@ double calc_match_lvl(point_t* img1, point_t* img2, int img1_points)
 	return dist_sum;
 }
 
-int dev_matches;
-double q_calc_match_lvl(point_t* img1, point_t* img2, int img1_points, double radius)
+int print_dbg = 0;
+
+int range_opts_valid = 0;
+uint8_t o_starts[256];
+uint8_t o_ranges[256];
+
+/*
+
+*/
+void pre_search(point_t* img1, point_t* img2)
+{
+	int num_opers = 0;
+	int num_img1_masked = 0;
+	for(int i = 0; i < 256; i++)
+	{
+		if(!img1[i].valid) continue;
+
+		int smallest = 2000000000;
+
+		int o_smallest = 1000;
+		int o_biggest = -1000;
+
+		for(int o = 0; o < 256; o++)
+		{
+			if(!img2[o].valid) continue;
+			int dx = img2[o].x - img1[i].x;
+			int dy = img2[o].y - img1[i].y;
+			int dist = sq(dx) + sq(dy);
+
+			/*
+				We want to log minimum and maximum o index so that we can only scan the relevant possible area.
+			*/
+			if(dist < 300*300)
+			{
+				int o_aligned = (o<128)?o:o-256; // We want to have negative numbers from the high range, so that looking for min/max works.
+//				printf("i=%d  o=%d  o_aligned=%d\n", i, o, o_aligned);
+
+				if(o_aligned < o_smallest) o_smallest = o_aligned;
+				if(o_aligned > o_biggest) o_biggest = o_aligned;
+			}
+
+			if(dist < smallest)
+			{
+				smallest = dist;
+			}
+		}
+
+		if(o_smallest == 1000) // not found
+		{
+			num_img1_masked++;
+			img1[i].valid = 0;
+			o_ranges[i] = 255;
+//			printf("i=%d  ALL POINTS FAR AWAY -> valid=0\n", i);
+		}
+		else
+		{
+			o_smallest -= 2;
+			int o_range = o_biggest-o_smallest+2;
+//			printf("i=%d, o_smallest=%d -> %d, o_biggest=%d -> %d, o_range=%d\n", i, o_smallest, o_smallest<0?o_smallest+256:o_smallest, o_biggest, o_biggest<0?o_biggest+256:o_biggest, o_range);
+
+			if(o_smallest < 0) o_smallest+=256;
+			o_starts[i] = o_smallest;
+			o_ranges[i] = o_range;
+
+			num_opers += o_range;
+		}
+
+		/*
+			img1 is always the same; img2 is adjusted.
+			If, without the adjustments, the nearest img2 point is very far away, it
+			will be far away even with any adjustments, and thus, does not contribute.
+			Masking it away makes the calculation significantly quicker.
+		*/
+//		if(smallest > 300*300)
+//		{
+//			num_img1_masked++;
+//			img1[i].valid = 0;
+//		}
+	}
+
+	printf("pre_search: num_img1_masked=%d, num_opers=%d instead of half-optimized %d!\n", num_img1_masked, num_opers, (256-num_img1_masked)*128);
+
+	range_opts_valid = 1;
+}
+
+double q_calc_match_lvl(point_t* img1, point_t* img2)
 {
 	/*
 	For each point in the first image, search the nearest point in the second image; any valid point will do.
@@ -190,17 +278,56 @@ double q_calc_match_lvl(point_t* img1, point_t* img2, int img1_points, double ra
 	*/
 
 	double dist_sum = 0.0;
-	int matches = 0;
 	for(int i = 0; i < 256; i++)
 	{
 		if(!img1[i].valid) continue;
 
 		int smallest = 2000000000;
-//		uint8_t odx = (uint8_t)((uint8_t)i - (uint8_t)85);
-//		for(int o = 0; o < 168; o++)
+
+
+		if(range_opts_valid) // The Shit on optimization.
+		{
+			uint8_t odx = o_starts[i];
+			int range = o_ranges[i];
+			if(range == 255)
+			{
+				printf("Supper failure at i=%d.\n", i);
+				return 0.0;
+			}
+			for(int o = 0; o < range; o++)
+			{
+				odx++;
+				if(!img2[odx].valid) continue;
+				int dx = img2[odx].x - img1[i].x;
+				int dy = img2[odx].y - img1[i].y;
+				int dist = sq(dx) + sq(dy);
+				if(dist < smallest)
+				{
+					smallest = dist;
+				}
+			}
+		}
+		else
+		{
+			// Basic optimization that goes through half of the data each round.
+			uint8_t odx = (uint8_t)((uint8_t)i - (uint8_t)65);
+			for(int o = 0; o < 128; o++)
+			{
+				odx++;
+				if(!img2[odx].valid) continue;
+				int dx = img2[odx].x - img1[i].x;
+				int dy = img2[odx].y - img1[i].y;
+				int dist = sq(dx) + sq(dy);
+				if(dist < smallest)
+				{
+					smallest = dist;
+				}
+			}
+		}
+
+/* Non-optimized code going through all points:
 		for(int o = 0; o < 256; o++)
 		{
-//			odx++;
 			if(!img2[o].valid) continue;
 			int dx = img2[o].x - img1[i].x;
 			int dy = img2[o].y - img1[i].y;
@@ -210,22 +337,25 @@ double q_calc_match_lvl(point_t* img1, point_t* img2, int img1_points, double ra
 				smallest = dist;
 			}
 		}
+*/
 
-		double dist_scaled = /*sqrt(sqrt(*/(double)smallest;//));
-		if(dist_scaled < radius*radius)
-		{
-			dist_sum += dist_scaled;
-			matches++;
-		}
+		double dist_scaled;
+
+		// Divider offset:
+		// 50 breaks the results down
+		// 100 seems to be nearly identical to 200, which is fine
+		// 400 is again nearly identical to 200. More careful in the most difficult case (undercorrects instead of overcorrection)
+		// 800 is like again like 200 and 400, but shows very slight improvement in one image of the 20.
+		// 1600 gets the difficult one most right so far!
+		// 3200 shows very, very small degradation in trivial cases - slight undercorrection. Still very good.
+		// 6400: about the same.
+
+		dist_scaled = 1000.0/((double)smallest+1600.0); // avoid division by zero, and numbers too huge.
+		dist_sum += dist_scaled;
+
 	}
 
-	dev_matches = matches;
-	if(matches < 30) return 999999999999999999999.9;
-	dist_sum /= (double)(matches/**matches*/);
-	return dist_sum;
-
-//	if(matches == 0) return 999999999999.9;
-//	return 1.0/matches;
+	return -1*dist_sum; // reciprocal function makes larger -> better; invert the sign so that the simple comparison later works!
 }
 
 
@@ -251,10 +381,13 @@ void write_lidar(FILE* f, lidar_scan_t* l)
 
 int main(int argc, char** argv)
 {
+	if(argc>1 && argv[1][0] == 'a')
+		alter = 1;
+	
 	FILE* f_bef_in     = fopen("lidar_before_in", "r");
 	FILE* f_aft_in     = fopen("lidar_after_in", "r");
 	FILE* f_csv        = fopen("log.csv", "w");
-	FILE* f_aft_out    = fopen("lidar_after_out", "w");
+	FILE* f_aft_out    = fopen(alter?"lidar_after_out_alt":"lidar_after_out", "w");
 
 	if(!f_bef_in) {printf("Error opening lidar_before_in for read\n"); return 1;}
 	if(!f_aft_in) {printf("Error opening lidar_after_in for read\n"); return 1;}
@@ -279,20 +412,29 @@ int main(int argc, char** argv)
 	LIDAR_RANGE must be slightly smaller than in real life, since we are assuming zero error in robot coordinates.
 	*/
 
-	for(int i = 0; i < 360; i++)
+//	for(int i = 0; i < 360; i++) // IF NOT q
+	for(int i = 0; i < 256; i++) // IF q
 	{
-		if(sqrt(sq((double)(bef2d[i].x - aft.x)) + sq((double)(bef2d[i].y - aft.y))) > LIDAR_RANGE)
+		double dist_befpoint_to_aft_origin = sqrt(sq((double)(bef2d[i].x - aft.x)) + sq((double)(bef2d[i].y - aft.y)));
+		double dist_aftpoint_to_bef_origin = sqrt(sq((double)(aft2d[i].x - bef.x)) + sq((double)(aft2d[i].y - bef.y)));
+
+//		if(bef.scan[i] != 0)
+//			printf("i=%d, x=%d, y=%d, dist=%.0f\n", i, bef2d[i].x, bef2d[i].y, dist_befpoint_to_aft_origin);
+
+		if(dist_befpoint_to_aft_origin > LIDAR_RANGE)
 		{
 			bef2d[i].valid = 0;
-			bef.scan[i] = 0;
+//			bef.scan[i] = 0;
 		}
-		if(sqrt(sq((double)(aft2d[i].x - bef.x)) + sq((double)(aft2d[i].y - bef.y))) > LIDAR_RANGE)
+		if(dist_aftpoint_to_bef_origin > LIDAR_RANGE)
 		{
 			aft2d[i].valid = 0;
-			aft.scan[i] = 0;
+//			aft.scan[i] = 0;
 		}
 	}
 
+	if(alter)
+		pre_search(bef2d, aft2d);
 
 	int points1 = q_num_points(bef2d);
 	int points2 = q_num_points(aft2d);
@@ -321,22 +463,28 @@ int main(int argc, char** argv)
 	int best_y;
 
 	fprintf(f_csv, "a,x,y,lvl,n_matches\n");
+
+
 	for(double a_corr = -2.0; a_corr < 2.1; a_corr += 1.0)
 	{
-		printf("a_corr = %.2f\r", a_corr); fflush(stdout);
+		double a_weigh = 1.0 - fabs(a_corr)*0.125;
 		int a_corr_i = a_corr/360.0 * 4294967296.0;
 		aft_corr.angle = aft.angle + a_corr_i;
-		for(int x_corr = -200; x_corr < 200; x_corr += 20)
+		for(int x_corr = -200; x_corr < 201; x_corr += 40)
 		{
+			double x_weigh = 1.0 - 0.25*((double)sq(x_corr))/40000.0;
 			aft_corr.x = aft.x + x_corr;
-			for(int y_corr = -200; y_corr < 200; y_corr += 20)
+			for(int y_corr = -200; y_corr < 201; y_corr += 40)
 			{
+				double y_weigh = 1.0 - 0.25*((double)sq(y_corr))/40000.0;
 				aft_corr.y = aft.y + y_corr;
 				q_scan_to_2d(&aft_corr, aft_corr_2d);
 
-				dev_matches = 0;
-				double lvl = q_calc_match_lvl(bef2d, aft_corr_2d, points1, 40.0);
-				fprintf(f_csv, "%.2f,%d,%d,%.3f,%d\n", a_corr, x_corr, y_corr, lvl, dev_matches);
+				double lvl = q_calc_match_lvl(bef2d, aft_corr_2d);
+//				printf("lvl=%f  aw=%f  xw=%f  yw=%f  ", lvl, a_weigh, x_weigh, y_weigh);
+				lvl = lvl * a_weigh * x_weigh * y_weigh;
+//				printf("->lvl=%f\n", lvl);
+				fprintf(f_csv, "%.2f,%d,%d,%.3f\n", a_corr, x_corr, y_corr, lvl);
 				if(lvl < smallest_lvl)
 				{
 					smallest_lvl = lvl;
@@ -355,25 +503,24 @@ int main(int argc, char** argv)
 		goto SKIP_CORRECT;
 	}
 
-	printf("\nBest correction: a = %.2f, x = %d, y = %d\n", best_a, best_x, best_y);
+	//printf("Best correction: a = %.2f, x = %d, y = %d\n", best_a, best_x, best_y);
 
 	double first_a = best_a;
 	int first_x = best_x;
 	int first_y = best_y;
 
-	for(double a_corr = first_a-1.25; a_corr < first_a+1.26; a_corr += 0.25)
+	for(double a_corr = first_a-1.00; a_corr < first_a+1.01; a_corr += 0.5)
 	{
-		printf("a_corr = %.2f\r", a_corr); fflush(stdout);
 		int a_corr_i = a_corr/360.0 * 4294967296.0;
 		aft_corr.angle = aft.angle + a_corr_i;
-		for(int x_corr = first_x-25; x_corr < first_x+26; x_corr += 5)
+		for(int x_corr = first_x-40; x_corr < first_x+41; x_corr += 10)
 		{
 			aft_corr.x = aft.x + x_corr;
-			for(int y_corr = first_y-25; y_corr < first_y+26; y_corr += 5)
+			for(int y_corr = first_y-40; y_corr < first_y+41; y_corr += 10)
 			{
 				aft_corr.y = aft.y + y_corr;
 				q_scan_to_2d(&aft_corr, aft_corr_2d);
-				double lvl = q_calc_match_lvl(bef2d, aft_corr_2d, points1, 10.0);
+				double lvl = q_calc_match_lvl(bef2d, aft_corr_2d);
 				fprintf(f_csv, "%.2f,%d,%d,%.3f\n", a_corr, x_corr, y_corr, lvl);
 				if(lvl < smallest_lvl)
 				{
@@ -386,25 +533,24 @@ int main(int argc, char** argv)
 		}
 	}
 
-	printf("\nBest correction: a = %.2f, x = %d, y = %d\n", best_a, best_x, best_y);
+	//printf("    Best correction: a = %.2f, x = %d, y = %d\n", best_a, best_x, best_y);
 
 	first_a = best_a;
 	first_x = best_x;
 	first_y = best_y;
 
-	for(double a_corr = first_a-0.4; a_corr < first_a+0.41; a_corr += 0.1)
+	for(double a_corr = first_a-0.5; a_corr < first_a+0.51; a_corr += 0.25)
 	{
-		printf("a_corr = %.2f\r", a_corr); fflush(stdout);
 		int a_corr_i = a_corr/360.0 * 4294967296.0;
 		aft_corr.angle = aft.angle + a_corr_i;
-		for(int x_corr = first_x-8; x_corr < first_x+9; x_corr += 2)
+		for(int x_corr = first_x-10; x_corr < first_x+11; x_corr += 5)
 		{
 			aft_corr.x = aft.x + x_corr;
-			for(int y_corr = first_y-8; y_corr < first_y+9; y_corr += 2)
+			for(int y_corr = first_y-10; y_corr < first_y+11; y_corr += 5)
 			{
 				aft_corr.y = aft.y + y_corr;
 				q_scan_to_2d(&aft_corr, aft_corr_2d);
-				double lvl = q_calc_match_lvl(bef2d, aft_corr_2d, points1, 4.0);
+				double lvl = q_calc_match_lvl(bef2d, aft_corr_2d);
 				fprintf(f_csv, "%.2f,%d,%d,%.3f\n", a_corr, x_corr, y_corr, lvl);
 				if(lvl < smallest_lvl)
 				{
@@ -417,7 +563,7 @@ int main(int argc, char** argv)
 		}
 	}
 
-	printf("\nBest correction: a = %.2f, x = %d, y = %d\n", best_a, best_x, best_y);
+	printf("        Best correction: a = %.2f, x = %d, y = %d\n", best_a, best_x, best_y);
 
 SKIP_CORRECT: ;
 	lidar_scan_t best;
@@ -425,6 +571,14 @@ SKIP_CORRECT: ;
 	best.angle += best_a/360.0 * 4294967296.0;
 	best.x += best_x;
 	best.y += best_y;
+
+//	best.angle += -0.25/360.0 * 4294967296.0;
+//	best.x += -40;
+//	best.y += -5;
+
+//	print_dbg = 1;
+//	q_scan_to_2d(&best, aft_corr_2d);
+//	q_calc_match_lvl(bef2d, aft_corr_2d);
 
 	write_lidar(f_aft_out, &best);
 
