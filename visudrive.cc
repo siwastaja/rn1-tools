@@ -269,34 +269,37 @@ void draw_robot(sf::RenderWindow& win)
 
 }
 
-#define NUM_LIDAR_SNAPSHOTS 20
+#define NUM_LIDAR_SNAPSHOTS 18
 
 int lidar_scan[360];
 int lidar_snapshots[NUM_LIDAR_SNAPSHOTS][360];
 double ang_at_snapshot[NUM_LIDAR_SNAPSHOTS];
 double x_at_snapshot[NUM_LIDAR_SNAPSHOTS];
 double y_at_snapshot[NUM_LIDAR_SNAPSHOTS];
+int special_idx_at_snapshot[NUM_LIDAR_SNAPSHOTS];
+
+static const sf::Color special_lidar_colors[3] =
+{
+	sf::Color(255, 0, 0, 150),
+	sf::Color(0, 255, 0, 150),
+	sf::Color(0, 0, 255, 150)
+};
 
 int sonars[3] = {1000,1000,1000};
 int sonar_angles[3] = {-8, 0, 8};
 
-void take_lidar_snapshot()
+void take_lidar_snapshot(int special_idx)
 {
 	static int ring_idx = 0;
-	static double prev_x = 0.0, prev_y = 0.0;
 
-//	if(fabs(cur_x - prev_x) >= 500.0 || fabs(cur_y - prev_y) >= 500.0)
-	{
-		prev_x = cur_x;
-		prev_y = cur_y;
-
-		memcpy(lidar_snapshots[ring_idx], lidar_scan, 360*sizeof(int));
-		ang_at_snapshot[ring_idx] = cur_angle_at_lidar_update;
-		x_at_snapshot[ring_idx] = cur_x_at_lidar_update;
-		y_at_snapshot[ring_idx] = cur_y_at_lidar_update;
-		if(++ring_idx >= NUM_LIDAR_SNAPSHOTS) ring_idx = 0;
-	}
+	special_idx_at_snapshot[ring_idx] = idx;
+	memcpy(lidar_snapshots[ring_idx], lidar_scan, 360*sizeof(int));
+	ang_at_snapshot[ring_idx] = cur_angle_at_lidar_update;
+	x_at_snapshot[ring_idx] = cur_x_at_lidar_update;
+	y_at_snapshot[ring_idx] = cur_y_at_lidar_update;
+	if(++ring_idx >= NUM_LIDAR_SNAPSHOTS) ring_idx = 0;
 }
+
 
 void draw_lidar(sf::RenderWindow& win, int* lid_data, int alpha, double ang, double x, double y)
 {
@@ -634,7 +637,7 @@ int main(int argc, char** argv)
 	{
 		auto_subscribe_timeout++;
 
-		if(auto_subscribe_timeout > 100)
+		if(!uart && auto_subscribe_timeout > 100)
 		{
 			auto_subscribe_timeout = 0;
 			//printf("Auto subscribe\n");
@@ -984,6 +987,8 @@ int main(int argc, char** argv)
 
 			auto_subscribe_timeout = 0;
 
+//			printf("Got %02x\n", parsebuf[0]);
+
 			switch(parsebuf[0])
 			{
 				case 0x80:
@@ -1019,9 +1024,10 @@ int main(int argc, char** argv)
 					cur_x_at_lidar_update = I7x5_I32(parsebuf[4],parsebuf[5],parsebuf[6],parsebuf[7],parsebuf[8]);
 					cur_y_at_lidar_update = I7x5_I32(parsebuf[9],parsebuf[10],parsebuf[11],parsebuf[12],parsebuf[13]);
 
-					if(lidar_status&4)
+					int speziel_idx = (lidar_status&0b1100)>>2;
+					if(speziel_idx)
 					{
-						take_lidar_snapshot();
+						take_lidar_snapshot(speziel_idx);
 
 						if(save_lidars)
 						{
@@ -1145,6 +1151,9 @@ int main(int argc, char** argv)
 		draw_robot(win);
 		for(int l = 0; l < NUM_LIDAR_SNAPSHOTS; l++)
 			draw_lidar_quick(win, lidar_snapshots[l], 100, ang_at_snapshot[l], x_at_snapshot[l], y_at_snapshot[l]);
+			draw_lidar(win, lidar_snapshots[l], 255, cur_angle_at_lidar_update, cur_x_at_lidar_update, cur_y_at_lidar_update);
+
+
 		draw_lidar(win, lidar_scan, 255, cur_angle_at_lidar_update, cur_x_at_lidar_update, cur_y_at_lidar_update);
 
 		draw_sonars(win);
