@@ -92,6 +92,31 @@ lidar_scan_t dev_lidar_aft_out;
 lidar_scan_t dev_lidar_aft_out_alt;
 int dev_show_lidars;
 
+int dev_bonus;
+
+typedef struct
+{
+	int valid;
+	int32_t x;
+	int32_t y;
+} point_t;
+
+point_t dimg1[256], dimg2[256];
+
+void draw_dimg(sf::RenderWindow& win, point_t* img, sf::Color color)
+{
+	for(int i=0; i < 256; i++)
+	{
+		if(!img[i].valid) continue;
+
+		sf::RectangleShape rect(sf::Vector2f(2,2));
+		rect.setOrigin(1.0,1.0);
+		rect.setPosition((img[i].x+origin_x)/mm_per_pixel, (img[i].y+origin_y)/mm_per_pixel);
+		rect.setFillColor(color);
+		win.draw(rect);
+	}
+}
+
 void read_lidar(FILE* f, lidar_scan_t* l)
 {
 	fscanf(f, "%d %d %d", &l->angle, &l->x, &l->y);
@@ -289,7 +314,7 @@ void draw_robot(sf::RenderWindow& win)
 
 }
 
-#define NUM_LIDAR_SNAPSHOTS 3
+#define NUM_LIDAR_SNAPSHOTS 12
 
 int lidar_scan[360];
 int lidar_snapshots[NUM_LIDAR_SNAPSHOTS][360];
@@ -319,6 +344,17 @@ void take_lidar_snapshot(int special_idx)
 	x_at_snapshot[ring_idx] = cur_x_at_lidar_update;
 	y_at_snapshot[ring_idx] = cur_y_at_lidar_update;
 	if(++ring_idx >= NUM_LIDAR_SNAPSHOTS) ring_idx = 0;
+}
+
+void clear_lidar_snapshots()
+{
+	for(int i = 0; i < NUM_LIDAR_SNAPSHOTS; i++)
+	{
+		memset(lidar_snapshots[i], 0, 360*sizeof(int));
+		ang_at_snapshot[i] = 0;
+		x_at_snapshot[i] = 9999;
+		y_at_snapshot[i] = 9999;
+	}
 }
 
 void draw_lidar(sf::RenderWindow& win, int* lid_data, sf::Color color, float thick, double ang, double x, double y)
@@ -500,6 +536,13 @@ void draw_texts(sf::RenderWindow& win)
 		win.draw(t);
 	}
 
+/*	t.setCharacterSize(22);
+	t.setColor(sf::Color(250,0,0));
+	sprintf(buf, "%d", dev_bonus/4096);
+	t.setString(buf);
+	t.setPosition(screen_x/2-100,screen_y-400);
+	win.draw(t);
+*/
 
 	sprintf(buf, "son1 = %d  son2 = %d  son3 = %d  lidar_status=%02xh", sonars[0], sonars[1], sonars[2], lidar_status);
 	t.setString(buf);
@@ -863,6 +906,8 @@ int main(int argc, char** argv)
 						snd(6);
 						auto_angle = 0;
 						auto_fwd = 0;
+//						clear_lidar_snapshots();
+
 					}
 				}
 				else
@@ -1045,7 +1090,7 @@ int main(int argc, char** argv)
 					lidar_status = parsebuf[1];
 					for(int i = 0; i < 360; i++)
 					{
-						lidar_scan[359-i] = parsebuf[14+2*i+1]<<7 | parsebuf[14+2*i];
+						lidar_scan[i] = parsebuf[14+2*i+1]<<7 | parsebuf[14+2*i];
 					}
 					double a = (double)(I14x2_I16(parsebuf[2], parsebuf[3]));
 					a = a * 360.0 / 65536.0;
@@ -1053,8 +1098,10 @@ int main(int argc, char** argv)
 					cur_x_at_lidar_update = I7x5_I32(parsebuf[4],parsebuf[5],parsebuf[6],parsebuf[7],parsebuf[8]);
 					cur_y_at_lidar_update = I7x5_I32(parsebuf[9],parsebuf[10],parsebuf[11],parsebuf[12],parsebuf[13]);
 
+					dev_bonus = I7x5_I32(parsebuf[360*2+14],parsebuf[360*2+15],parsebuf[360*2+16],parsebuf[360*2+17],parsebuf[360*2+18]);
+
 					int speziel_idx = (lidar_status&0b1100)>>2;
-					if(speziel_idx)
+					if(speziel_idx == 1)
 					{
 						take_lidar_snapshot(speziel_idx);
 
@@ -1080,6 +1127,52 @@ int main(int argc, char** argv)
 				sonars[1] = (I14x2_I16(parsebuf[5], parsebuf[4]))>>2;
 				sonars[2] = (I14x2_I16(parsebuf[7], parsebuf[6]))>>2;
 
+				break;
+
+				case 0x98:
+				{
+					if(parsebuf[1] == 0)
+					{
+						for(int i = 0; i < 128; i++)
+						{
+							dimg1[i].valid = parsebuf[2+5*i+0];
+							dimg1[i].x = I14x2_I16(parsebuf[2+5*i+1],parsebuf[2+5*i+2]);
+							dimg1[i].y = I14x2_I16(parsebuf[2+5*i+3],parsebuf[2+5*i+4]);
+						}
+					}
+					else
+					{
+						for(int i = 0; i < 128; i++)
+						{
+							dimg2[i].valid = parsebuf[2+5*i+0];
+							dimg2[i].x = I14x2_I16(parsebuf[2+5*i+1],parsebuf[2+5*i+2]);
+							dimg2[i].y = I14x2_I16(parsebuf[2+5*i+3],parsebuf[2+5*i+4]);
+						}
+					}
+				}
+				break;
+
+				case 0x99:
+				{
+					if(parsebuf[1] == 0)
+					{
+						for(int i = 0; i < 128; i++)
+						{
+							dimg1[i+128].valid = parsebuf[2+5*i+0];
+							dimg1[i+128].x = I14x2_I16(parsebuf[2+5*i+1],parsebuf[2+5*i+2]);
+							dimg1[i+128].y = I14x2_I16(parsebuf[2+5*i+3],parsebuf[2+5*i+4]);
+						}
+					}
+					else
+					{
+						for(int i = 0; i < 128; i++)
+						{
+							dimg2[i+128].valid = parsebuf[2+5*i+0];
+							dimg2[i+128].x = I14x2_I16(parsebuf[2+5*i+1],parsebuf[2+5*i+2]);
+							dimg2[i+128].y = I14x2_I16(parsebuf[2+5*i+3],parsebuf[2+5*i+4]);
+						}
+					}
+				}
 				break;
 
 				case 0xa0:
@@ -1184,10 +1277,10 @@ int main(int argc, char** argv)
 		draw_robot(win);
 		for(int l = 0; l < NUM_LIDAR_SNAPSHOTS; l++)
 		{
-			if(dev_apply && special_idx_at_snapshot[l] == 2)
+			if(dev_apply && special_idx_at_snapshot[l] == 3)
 			{
 				draw_lidar(win, lidar_snapshots[l], special_lidar_colors[special_idx_at_snapshot[l]], lidar_line_thick,
-					ang_at_snapshot[l]-(360*(double)dbg[3]/4294967296.0), x_at_snapshot[l]-dbg[4], y_at_snapshot[l]-dbg[5]);
+					ang_at_snapshot[l]+(360*(double)dbg[3]/4294967296.0), x_at_snapshot[l]+dbg[4], y_at_snapshot[l]+dbg[5]);
 
 			}
 			else
@@ -1198,7 +1291,10 @@ int main(int argc, char** argv)
 
 		}
 
-		draw_lidar(win, lidar_scan, sf::Color(0,0,0,100), lidar_line_thick, cur_angle_at_lidar_update, cur_x_at_lidar_update, cur_y_at_lidar_update);
+//		draw_dimg(win, dimg1, sf::Color(0, 128, 0, 128));
+//		draw_dimg(win, dimg2, sf::Color(0, 0, 128, 128));
+
+		draw_lidar(win, lidar_scan, sf::Color(30,15,0,100), lidar_line_thick, cur_angle_at_lidar_update, cur_x_at_lidar_update, cur_y_at_lidar_update);
 
 		draw_sonars(win);
 		draw_texts(win);
