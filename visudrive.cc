@@ -70,6 +70,7 @@ int d1;
 
 int32_t dbg[10];
 
+int auto_x, auto_y;
 int auto_angle = 0;
 int auto_fwd = 0;
 
@@ -270,10 +271,11 @@ void draw_robot(sf::RenderWindow& win)
 
 			r.setRotation(cur_angle-north_corr+auto_angle);
 
-			double xmove = cos(M_PI*((double)(cur_angle-north_corr+auto_angle))/180.0) * (double)auto_fwd;
-			double ymove = sin(M_PI*((double)(cur_angle-north_corr+auto_angle))/180.0) * (double)auto_fwd;
+//			double xmove = cos(M_PI*((double)(cur_angle-north_corr+auto_angle))/180.0) * (double)auto_fwd;
+//			double ymove = sin(M_PI*((double)(cur_angle-north_corr+auto_angle))/180.0) * (double)auto_fwd;
 
-			r.setPosition((cur_x+origin_x+xmove)/mm_per_pixel,(cur_y+origin_y+ymove)/mm_per_pixel);
+//			r.setPosition((cur_x+origin_x+xmove)/mm_per_pixel,(cur_y+origin_y+ymove)/mm_per_pixel);
+			r.setPosition((origin_x+auto_x)/mm_per_pixel,(origin_y+auto_y)/mm_per_pixel);
 
 			win.draw(r);
 
@@ -281,8 +283,10 @@ void draw_robot(sf::RenderWindow& win)
 
 			double x1 = (cur_x+origin_x)/mm_per_pixel;
 			double y1 = (cur_y+origin_y)/mm_per_pixel;
-			double x2 = (cur_x+origin_x+xmove)/mm_per_pixel;
-			double y2 = (cur_y+origin_y+ymove)/mm_per_pixel;
+//			double x2 = (cur_x+origin_x+xmove)/mm_per_pixel;
+//			double y2 = (cur_y+origin_y+ymove)/mm_per_pixel;
+			double x2 = (origin_x+auto_x)/mm_per_pixel;
+			double y2 = (origin_y+auto_y)/mm_per_pixel;
 			sf::RectangleShape rect(sf::Vector2f( sqrt(pow(x2-x1,2)+pow(y2-y1,2)), 10.0));
 			rect.setOrigin(0, 5.0);
 			rect.setPosition(x1, y1);
@@ -291,24 +295,33 @@ void draw_robot(sf::RenderWindow& win)
 
 			win.draw(rect);
 
+			sf::Text t;
+			t.setFont(arial);
+			char buf[128];
+			sprintf(buf, "%d deg", auto_angle);
+			t.setString(buf);
+			t.setCharacterSize(14);
+			t.setColor(sf::Color(0,0,0,110));
+			t.setPosition((cur_x+origin_x)/mm_per_pixel-10.0,((cur_y+origin_y)/mm_per_pixel)+30.0);
+			win.draw(t);
+
+			sprintf(buf, "%d mm", auto_fwd);
+			t.setString(buf);
+			t.setCharacterSize(16);
+			t.setColor(sf::Color(0,0,0,110));
+			t.setPosition((cur_x+origin_x)/mm_per_pixel-10.0,((cur_y+origin_y)/mm_per_pixel)+10.0);
+			win.draw(t);
+
+			sprintf(buf, "X%5d Y%5d", auto_x, auto_y);
+			t.setString(buf);
+			t.setCharacterSize(16);
+			t.setColor(sf::Color(128,0,128));
+			t.setPosition((auto_x+origin_x)/mm_per_pixel-60.0,((auto_y+origin_y)/mm_per_pixel)-10.0);
+			win.draw(t);
+
+
 		}
 
-		sf::Text t;
-		t.setFont(arial);
-		char buf[128];
-		sprintf(buf, "%d", auto_angle);
-		t.setString(buf);
-		t.setCharacterSize(14);
-		t.setColor(sf::Color(0,0,0));
-		t.setPosition((cur_x+origin_x)/mm_per_pixel-10.0,((cur_y+origin_y)/mm_per_pixel)+20.0);
-		win.draw(t);
-
-		sprintf(buf, "%d", auto_fwd);
-		t.setString(buf);
-		t.setCharacterSize(16);
-		t.setColor(sf::Color(0,0,0));
-		t.setPosition((cur_x+origin_x)/mm_per_pixel-10.0,((cur_y+origin_y)/mm_per_pixel)-20.0);
-		win.draw(t);
 
 	}
 
@@ -825,12 +838,16 @@ int main(int argc, char** argv)
 			else // automatic control
 			{
 				sf::Vector2i localPosition = sf::Mouse::getPosition(win);
-				double click_x = (localPosition.x * mm_per_pixel) - origin_x - cur_x;
-				double click_y = (localPosition.y * mm_per_pixel) - origin_y - cur_y;
+				double click_x_rel = (localPosition.x * mm_per_pixel) - origin_x - cur_x;
+				double click_y_rel = (localPosition.y * mm_per_pixel) - origin_y - cur_y;
+				double click_x_abs = (localPosition.x * mm_per_pixel) - origin_x;
+				double click_y_abs = (localPosition.y * mm_per_pixel) - origin_y;
 				if(sf::Mouse::isButtonPressed(sf::Mouse::Left))
 				{
-						auto_angle = -1* ((360.0/(2*M_PI)*atan2(click_x, click_y)) + cur_angle - 90 - north_corr);
-						auto_fwd = sqrt(click_x*click_x + click_y*click_y);
+						auto_x = click_x_abs;
+						auto_y = click_y_abs;
+						auto_angle = -1* ((360.0/(2*M_PI)*atan2(click_x_rel, click_y_rel)) + cur_angle - 90 - north_corr);
+						auto_fwd = sqrt(click_x_rel*click_x_rel + click_y_rel*click_y_rel);
 						if(auto_angle < -180) auto_angle += 360;
 						else if(auto_angle > 180) auto_angle -= 360;
 						if(auto_angle < -180) auto_angle += 360;
@@ -838,8 +855,10 @@ int main(int argc, char** argv)
 				}
 				else if(sf::Mouse::isButtonPressed(sf::Mouse::Right))
 				{
-						auto_angle = -1* ((360.0/(2*M_PI)*atan2(click_x, click_y)) + cur_angle + 90 - north_corr);
-						auto_fwd = -1 * sqrt(click_x*click_x + click_y*click_y);
+						auto_x = click_x_abs;
+						auto_y = click_y_abs;
+						auto_angle = -1* ((360.0/(2*M_PI)*atan2(click_x_rel, click_y_rel)) + cur_angle + 90 - north_corr);
+						auto_fwd = -1 * sqrt(click_x_rel*click_x_rel + click_y_rel*click_y_rel);
 						if(auto_angle < -180) auto_angle += 360;
 						else if(auto_angle > 180) auto_angle -= 360;
 						if(auto_angle < -180) auto_angle += 360;
@@ -894,19 +913,39 @@ int main(int argc, char** argv)
 				{
 					if(!return_pressed)
 					{
-						double fauto = auto_angle/360.0*65536.0;
-						int iauto = fauto;
 						return_pressed = 1;
-						txbuf[0] = 0x81;
-						txbuf[1] = I16_MS(iauto);
-						txbuf[2] = I16_LS(iauto);
-						txbuf[3] = I16_MS(auto_fwd);
-						txbuf[4] = I16_LS(auto_fwd);
-						txbuf[5] = 0xff;
-						snd(6);
+						if(sf::Keyboard::isKeyPressed(sf::Keyboard::LShift))
+						{
+							double fauto = auto_angle/360.0*65536.0;
+							int iauto = fauto;
+							txbuf[0] = 0x81;
+							txbuf[1] = I16_MS(iauto);
+							txbuf[2] = I16_LS(iauto);
+							txbuf[3] = I16_MS(auto_fwd);
+							txbuf[4] = I16_LS(auto_fwd);
+							txbuf[5] = 0xff;
+							snd(6);
+						}
+						else
+						{
+
+							txbuf[0] = 0x82;
+							txbuf[1] = I32_I7_4(auto_x);
+							txbuf[2] = I32_I7_3(auto_x);
+							txbuf[3] = I32_I7_2(auto_x);
+							txbuf[4] = I32_I7_1(auto_x);
+							txbuf[5] = I32_I7_0(auto_x);
+							txbuf[6] = I32_I7_4(auto_y);
+							txbuf[7] = I32_I7_3(auto_y);
+							txbuf[8] = I32_I7_2(auto_y);
+							txbuf[9] = I32_I7_1(auto_y);
+							txbuf[10] = I32_I7_0(auto_y);
+							txbuf[11] = 0xff;
+							snd(12);
+						}
 						auto_angle = 0;
 						auto_fwd = 0;
-//						clear_lidar_snapshots();
+						auto_x = 0; auto_y = 0;
 
 					}
 				}
