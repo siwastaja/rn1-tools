@@ -46,6 +46,10 @@ double robot_ys2 = 510.0;
 double lidar_xoffs = 120.0;
 double lidar_yoffs = 0.0;
 
+double cur_xs[128];
+double cur_ys[128];
+double cur_angles[128];
+
 double cur_x = 0.0;
 double cur_y = 0.0;
 double cur_angle = 0.0;
@@ -79,21 +83,11 @@ int lidar_status = 0;
 int charging = 0;
 int charge_finished = 0;
 
-typedef struct
-{
-	int32_t angle;
-	int32_t x;
-	int32_t y;
-	int scan[360];
-} lidar_scan_t;
+int cur_lidar_idx = 0;
 
-lidar_scan_t dev_lidar_bef_in;
-lidar_scan_t dev_lidar_aft_in;
-lidar_scan_t dev_lidar_aft_out;
-lidar_scan_t dev_lidar_aft_out_alt;
-int dev_show_lidars;
-
-int dev_bonus;
+int lidar_corr_status[128];
+double lidar_corr_angle[128];
+int lidar_corr_x[128], lidar_corr_y[128];
 
 typedef struct
 {
@@ -102,11 +96,11 @@ typedef struct
 	int32_t y;
 } point_t;
 
-point_t dimg1[256], dimg2[256];
+point_t lidar_scan[128][360];
 
-void draw_dimg(sf::RenderWindow& win, point_t* img, sf::Color color)
+void draw_img(sf::RenderWindow& win, point_t* img, sf::Color color)
 {
-	for(int i=0; i < 256; i++)
+	for(int i=0; i < 360; i++)
 	{
 		if(!img[i].valid) continue;
 
@@ -116,27 +110,6 @@ void draw_dimg(sf::RenderWindow& win, point_t* img, sf::Color color)
 		rect.setFillColor(color);
 		win.draw(rect);
 	}
-}
-
-void read_lidar(FILE* f, lidar_scan_t* l)
-{
-	fscanf(f, "%d %d %d", &l->angle, &l->x, &l->y);
-	for(int i = 0; i < 360; i++)
-	{
-		int t;
-		fscanf(f, "%d", &t);
-		l->scan[i] = t;
-	}
-}
-
-
-void write_lidar(FILE* f, lidar_scan_t* l)
-{
-	fprintf(f, "%d %d %d ", l->angle, l->x, l->y);
-	for(int i = 0; i < 360; i++)
-	{
-		fprintf(f, "%d ", l->scan[i]);
-	}	
 }
 
 int set_uart_attribs(int fd, int speed)
@@ -315,7 +288,7 @@ void draw_robot(sf::RenderWindow& win)
 			sprintf(buf, "X%5d Y%5d", auto_x, auto_y);
 			t.setString(buf);
 			t.setCharacterSize(16);
-			t.setColor(sf::Color(128,0,128));
+			t.setColor(sf::Color(255,0,255,190));
 			t.setPosition((auto_x+origin_x)/mm_per_pixel-60.0,((auto_y+origin_y)/mm_per_pixel)-10.0);
 			win.draw(t);
 
@@ -327,111 +300,8 @@ void draw_robot(sf::RenderWindow& win)
 
 }
 
-#define NUM_LIDAR_SNAPSHOTS 12
-
-int lidar_scan[360];
-int lidar_snapshots[NUM_LIDAR_SNAPSHOTS][360];
-double ang_at_snapshot[NUM_LIDAR_SNAPSHOTS];
-double x_at_snapshot[NUM_LIDAR_SNAPSHOTS];
-double y_at_snapshot[NUM_LIDAR_SNAPSHOTS];
-int special_idx_at_snapshot[NUM_LIDAR_SNAPSHOTS];
-
-static const sf::Color special_lidar_colors[4] =
-{
-	sf::Color(0, 0, 0, 100),
-	sf::Color(255, 0, 0, 150),
-	sf::Color(0, 255, 0, 170),
-	sf::Color(0, 0, 255, 70)
-};
-
 int sonars[3] = {1000,1000,1000};
 int sonar_angles[3] = {-8, 0, 8};
-
-void take_lidar_snapshot(int special_idx)
-{
-	static int ring_idx = 0;
-
-	special_idx_at_snapshot[ring_idx] = special_idx;
-	memcpy(lidar_snapshots[ring_idx], lidar_scan, 360*sizeof(int));
-	ang_at_snapshot[ring_idx] = cur_angle_at_lidar_update;
-	x_at_snapshot[ring_idx] = cur_x_at_lidar_update;
-	y_at_snapshot[ring_idx] = cur_y_at_lidar_update;
-	if(++ring_idx >= NUM_LIDAR_SNAPSHOTS) ring_idx = 0;
-}
-
-void clear_lidar_snapshots()
-{
-	for(int i = 0; i < NUM_LIDAR_SNAPSHOTS; i++)
-	{
-		memset(lidar_snapshots[i], 0, 360*sizeof(int));
-		ang_at_snapshot[i] = 0;
-		x_at_snapshot[i] = 9999;
-		y_at_snapshot[i] = 9999;
-	}
-}
-
-void draw_lidar(sf::RenderWindow& win, int* lid_data, sf::Color color, float thick, double ang, double x, double y)
-{
-	for(int i = 0; i < 360; i++)
-	{
-		int ip = (i==359)?0:(i+1);
-		int first = lid_data[i];
-		int second = lid_data[ip];
-
-		if(first == 0 && second == 0)
-			continue;
-
-		if(first == 0) first = second;
-		else if(second == 0) second = first;
-
-		if(abs(first-second) > 200)
-			continue;
-
-		double x1 = (x+origin_x+cos(M_PI*(ang-north_corr+(double)i)/180.0) * first)/mm_per_pixel;
-		double y1 = (y+origin_y+sin(M_PI*(ang-north_corr+(double)i)/180.0) * first)/mm_per_pixel;
-		double x2 = (x+origin_x+cos(M_PI*(ang-north_corr+(double)ip)/180.0) * second)/mm_per_pixel;
-		double y2 = (y+origin_y+sin(M_PI*(ang-north_corr+(double)ip)/180.0) * second)/mm_per_pixel;
-		sf::RectangleShape rect(sf::Vector2f( sqrt(pow(x2-x1,2)+pow(y2-y1,2)), thick));
-		rect.setOrigin(0, thick/2.0);
-		rect.setPosition(x1, y1);
-		rect.setRotation(atan2(y2-y1,x2-x1)*180.0/M_PI);
-		rect.setFillColor(color);
-
-		win.draw(rect);
-	}
-}
-
-void draw_lidar_quick(sf::RenderWindow& win, int* lid_data, sf::Color color, double ang, double x, double y)
-{
-	for(int i = 4; i < 354; i+=4)
-	{
-		int ip = (i+4);
-		int first = lid_data[i];
-		int second = lid_data[ip];
-
-		if(first == 0 && second == 0)
-			continue;
-
-		if(first == 0) first = second;
-		else if(second == 0) second = first;
-
-		if(abs(first-second) > 200)
-			continue;
-
-		double x1 = (x+origin_x+cos(M_PI*(ang-north_corr+(double)i)/180.0) * first)/mm_per_pixel;
-		double y1 = (y+origin_y+sin(M_PI*(ang-north_corr+(double)i)/180.0) * first)/mm_per_pixel;
-		double x2 = (x+origin_x+cos(M_PI*(ang-north_corr+(double)ip)/180.0) * second)/mm_per_pixel;
-		double y2 = (y+origin_y+sin(M_PI*(ang-north_corr+(double)ip)/180.0) * second)/mm_per_pixel;
-		sf::RectangleShape rect(sf::Vector2f( sqrt(pow(x2-x1,2)+pow(y2-y1,2)), old_lidar_line_thick));
-		rect.setOrigin(0, old_lidar_line_thick/2.0);
-		rect.setPosition(x1, y1);
-		rect.setRotation(atan2(y2-y1,x2-x1)*180.0/M_PI);
-		rect.setFillColor(color);
-
-		win.draw(rect);
-	}
-}
-
 
 void draw_sonars(sf::RenderWindow& win)
 {
@@ -449,7 +319,6 @@ void draw_sonars(sf::RenderWindow& win)
 			if(angle_comp > 359) angle_comp -= 360;
 			if(i == angle_comp)
 			{
-				double a = angle_comp;
 				int in2 = i-4;
 				int ip2 = i+4;
 				if(in2<0) in2+=360;
@@ -542,7 +411,6 @@ void draw_texts(sf::RenderWindow& win)
 	t.setColor(sf::Color(0,0,0));
 	for(int i = 0; i<10; i++)
 	{
-//		if(i==2 || i==3) continue;
 		sprintf(buf, "dbg[%2i] = %11d (%08x)", i, dbg[i], dbg[i]);
 		t.setString(buf);
 		t.setPosition(10,screen_y-170 + 15*i);
@@ -563,6 +431,16 @@ void draw_texts(sf::RenderWindow& win)
 	t.setColor(sf::Color(0,0,0));
 	t.setPosition(10,10+8*22);
 	win.draw(t);
+
+
+	sprintf(buf, "lidar corr idx=%d  ret=%3d:   %4.2f  %4d  %4d", cur_lidar_idx, lidar_corr_status[cur_lidar_idx], lidar_corr_angle[cur_lidar_idx],
+		 lidar_corr_x[cur_lidar_idx], lidar_corr_y[cur_lidar_idx]);
+	t.setString(buf);
+	t.setCharacterSize(16);
+	t.setColor(sf::Color(0,0,0));
+	t.setPosition(10,10+10*22);
+	win.draw(t);
+
 
 	sprintf(buf, "X %5.0f  Y %5.0f  ang %5.1f", cur_x, cur_y, cur_angle);
 	t.setString(buf);
@@ -625,11 +503,10 @@ int main(int argc, char** argv)
 {
 	int return_pressed = 0;
 	int mouse_pressed = 0;
-	int save_lidars = 0;
-	int f9_pressed = 0;
 	int c_pressed = 0;
-	uint8_t rxbuf[1024];
-	uint8_t parsebuf[1024];
+	int f1_pressed = 0; int f2_pressed = 0;
+	uint8_t rxbuf[2048];
+	uint8_t parsebuf[2048];
 	int do_parse = 0;
 	int rxloc = 0;
 	int focus = 1;
@@ -694,15 +571,9 @@ int main(int argc, char** argv)
 	sf::RenderWindow win(sf::VideoMode(screen_x,screen_y), "RN#1 Visual Drive Hommeli Pommeli", sf::Style::Default, sets);
 	win.setFramerateLimit(60);
 
-	for(int i = 0; i < 360; i++)
-	{
-		lidar_scan[i] = 1000+i;
-	}
-
 	tcflush(uart, TCIFLUSH);
 
 	int cnt = 0;
-	int cnt2 = 0;
 	int auto_subscribe_timeout = 0;
 	while(win.isOpen())
 	{
@@ -772,6 +643,20 @@ int main(int argc, char** argv)
 			if(sf::Keyboard::isKeyPressed(sf::Keyboard::F6))
 			{
 				txbuf[0] = sf::Keyboard::isKeyPressed(sf::Keyboard::LShift)?0xd2:0xd1;
+				txbuf[1] = 0;
+				txbuf[2] = 0xff;
+				snd(3);
+			}
+			if(sf::Keyboard::isKeyPressed(sf::Keyboard::F7))
+			{
+				txbuf[0] = 0xd3;
+				txbuf[1] = 0;
+				txbuf[2] = 0xff;
+				snd(3);
+			}
+			if(sf::Keyboard::isKeyPressed(sf::Keyboard::F8))
+			{
+				txbuf[0] = 0xd4;
 				txbuf[1] = 0;
 				txbuf[2] = 0xff;
 				snd(3);
@@ -978,12 +863,34 @@ int main(int argc, char** argv)
 
 			if(sf::Keyboard::isKeyPressed(sf::Keyboard::F1))
 			{
-				north_corr-=1.0;
+//				north_corr-=1.0;
+				if(!f1_pressed)
+				{
+					f1_pressed = 1;
+					cur_lidar_idx--; if(cur_lidar_idx < 0) cur_lidar_idx = 127;
+					cur_angle = cur_angles[cur_lidar_idx];
+					cur_x = cur_xs[cur_lidar_idx];
+					cur_y = cur_ys[cur_lidar_idx];
+
+				}
 			}
+			else
+				f1_pressed = 0;
 			if(sf::Keyboard::isKeyPressed(sf::Keyboard::F2))
 			{
-				north_corr+=1.0;
+//				north_corr+=1.0;
+				if(!f2_pressed)
+				{
+					f2_pressed = 1;
+					cur_lidar_idx++; if(cur_lidar_idx > 127) cur_lidar_idx = 0;
+					cur_angle = cur_angles[cur_lidar_idx];
+					cur_x = cur_xs[cur_lidar_idx];
+					cur_y = cur_ys[cur_lidar_idx];
+				}
 			}
+			else
+				f2_pressed = 0;
+
 			if(sf::Keyboard::isKeyPressed(sf::Keyboard::F3))
 			{
 				if(sf::Keyboard::isKeyPressed(sf::Keyboard::LShift))
@@ -1019,34 +926,6 @@ int main(int argc, char** argv)
 				manual_control = 0;
 				control_on = 1;
 			}
-			if(sf::Keyboard::isKeyPressed(sf::Keyboard::F8))
-			{
-				dev_apply = 0;
-//				save_lidars = 2;
-			}
-			if(sf::Keyboard::isKeyPressed(sf::Keyboard::F9))
-			{
-				dev_apply = 1;
-
-/*				if(!f9_pressed)
-				{
-					f9_pressed = 1;
-					FILE *f1 = fopen("lidar_before_in", "r");
-					FILE *f2 = fopen("lidar_after_in", "r");
-					FILE *f3 = fopen("lidar_after_out", "r");
-					FILE *f4 = fopen("lidar_after_out_alt", "r");
-					dev_show_lidars = 1;
-					if(!f1) {printf("Can't open f1\n"); dev_show_lidars = 0;} else {read_lidar(f1, &dev_lidar_bef_in);}
-					if(!f2) {printf("Can't open f2\n"); dev_show_lidars = 0;} else {read_lidar(f2, &dev_lidar_aft_in);}
-					if(!f3) {printf("Can't open f3\n"); dev_show_lidars = 0;} else {read_lidar(f3, &dev_lidar_aft_out);}
-					if(!f4) {printf("Can't open f4\n"); dev_show_lidars = 0;} else {read_lidar(f4, &dev_lidar_aft_out_alt);}
-					if(f1) fclose(f1); if(f2) fclose(f2); if(f3) fclose(f3); if(f4) fclose(f4);
-				}
-
-				*/
-			}
-//			else
-//				f9_pressed = 0;
 		} // end if(focus)
 
 		win.clear(sf::Color(180,220,255));
@@ -1057,7 +936,7 @@ int main(int argc, char** argv)
 		{
 			while(read(uart, &byte, 1))
 			{
-				if(rxloc > 1000)
+				if(rxloc > 2000)
 					rxloc = 0;
 
 				if(byte > 127)
@@ -1078,7 +957,7 @@ int main(int argc, char** argv)
 			sf::IpAddress sender;
 			unsigned short sender_port;
 			std::size_t len = rxloc;
-			if(udpsock.receive(rxbuf, 1000, len, sender, sender_port) == sf::Socket::Done)
+			if(udpsock.receive(rxbuf, 2000, len, sender, sender_port) == sf::Socket::Done)
 			{
 //				printf("RECEIVED! len=%d  data = %u  %u  %u\n", len, rxbuf[0], rxbuf[1], rxbuf[2]);
 				memcpy(parsebuf, rxbuf, len);
@@ -1124,39 +1003,62 @@ int main(int argc, char** argv)
 //				cur_angle = 360.0/(2*M_PI)*atan2(compass_x, compass_y);
 				break;
 
+
 				case 0x84:
 				{
+					/*
+					 Lidar-based 2D MAP on uart:
+
+					num_bytes
+					 1	uint8 start byte
+					 1	uint7 status
+					 2	int14 cur_ang (at the middle point of the lidar scan)  (not used for turning the image, just to include robot coords)
+					 5	int32 cur_x   ( " " )
+					 5	int32 cur_y   ( " " )
+					 1	int7  correction return value
+					 2	int14 ang_corr (for information only)
+					 2	int14 x_corr (for information only)
+					 2	int14 y_corr (for information only) 
+					1440	360 * point
+						  2	int14  x referenced to cur_x
+						  2	int14  y referenced to cur_y
+
+						Total: 1461
+						Time to tx at 115200: ~130 ms
+
+					*/
+
 					lidar_status = parsebuf[1];
+					int idx = lidar_status;
+					cur_lidar_idx = idx;
+
+					double new_angle = (double)(I14x2_I16(parsebuf[2], parsebuf[3]))*360.0/65536.0;
+					int mid_x = I7x5_I32(parsebuf[4],parsebuf[5],parsebuf[6],parsebuf[7],parsebuf[8]);
+					int mid_y = I7x5_I32(parsebuf[9],parsebuf[10],parsebuf[11],parsebuf[12],parsebuf[13]);
+
+					cur_angle = cur_angles[idx] = new_angle;
+					cur_x = cur_xs[idx] = mid_x;
+					cur_y = cur_ys[idx] = mid_y;
+
+					lidar_corr_status[idx] = parsebuf[14];
+					lidar_corr_angle[idx] = (double)(I14x2_I16(parsebuf[15], parsebuf[16]))*360.0/65536.0;
+					lidar_corr_x[idx] = I14x2_I16(parsebuf[17], parsebuf[18])>>2;
+					lidar_corr_y[idx] = I14x2_I16(parsebuf[19], parsebuf[20])>>2;
 					for(int i = 0; i < 360; i++)
 					{
-						lidar_scan[i] = parsebuf[14+2*i+1]<<7 | parsebuf[14+2*i];
-					}
-					double a = (double)(I14x2_I16(parsebuf[2], parsebuf[3]));
-					a = a * 360.0 / 65536.0;
-					cur_angle_at_lidar_update = a;
-					cur_x_at_lidar_update = I7x5_I32(parsebuf[4],parsebuf[5],parsebuf[6],parsebuf[7],parsebuf[8]);
-					cur_y_at_lidar_update = I7x5_I32(parsebuf[9],parsebuf[10],parsebuf[11],parsebuf[12],parsebuf[13]);
-
-					dev_bonus = I7x5_I32(parsebuf[360*2+14],parsebuf[360*2+15],parsebuf[360*2+16],parsebuf[360*2+17],parsebuf[360*2+18]);
-
-					int speziel_idx = (lidar_status&0b1100)>>2;
-					if(speziel_idx == 1)
-					{
-						take_lidar_snapshot(speziel_idx);
-
-						if(save_lidars)
+						int x = I14x2_I16(parsebuf[21+4*i+0], parsebuf[21+4*i+1])>>2;
+						int y = I14x2_I16(parsebuf[21+4*i+2], parsebuf[21+4*i+3])>>2;
+						if(x != 0 && y != 0)
 						{
-							lidar_scan_t hommel;
-							for(int i = 0; i < 360; i++)
-								hommel.scan[i] = lidar_scan[i];
-							hommel.angle = ((int32_t)(I14x2_I16(parsebuf[2], parsebuf[3])))<<16;
-							hommel.x = cur_x_at_lidar_update;
-							hommel.y = cur_y_at_lidar_update;
-							FILE* f_scanout = fopen((save_lidars==2)?"lidar_before_in":"lidar_after_in", "w");
-							write_lidar(f_scanout, &hommel);
-							fclose(f_scanout);
-							save_lidars--;
+							lidar_scan[idx][i].x = x + mid_x;
+							lidar_scan[idx][i].y = y + mid_y;
+							lidar_scan[idx][i].valid = 1;
 						}
+						else
+						{
+							lidar_scan[idx][i].valid = 0;
+						}
+
 					}
 				}
 				break;
@@ -1168,63 +1070,10 @@ int main(int argc, char** argv)
 
 				break;
 
-				case 0x98:
-				{
-					if(parsebuf[1] == 0)
-					{
-						for(int i = 0; i < 128; i++)
-						{
-							dimg1[i].valid = parsebuf[2+5*i+0];
-							dimg1[i].x = I14x2_I16(parsebuf[2+5*i+1],parsebuf[2+5*i+2]);
-							dimg1[i].y = I14x2_I16(parsebuf[2+5*i+3],parsebuf[2+5*i+4]);
-						}
-					}
-					else
-					{
-						for(int i = 0; i < 128; i++)
-						{
-							dimg2[i].valid = parsebuf[2+5*i+0];
-							dimg2[i].x = I14x2_I16(parsebuf[2+5*i+1],parsebuf[2+5*i+2]);
-							dimg2[i].y = I14x2_I16(parsebuf[2+5*i+3],parsebuf[2+5*i+4]);
-						}
-					}
-				}
-				break;
-
-				case 0x99:
-				{
-					if(parsebuf[1] == 0)
-					{
-						for(int i = 0; i < 128; i++)
-						{
-							dimg1[i+128].valid = parsebuf[2+5*i+0];
-							dimg1[i+128].x = I14x2_I16(parsebuf[2+5*i+1],parsebuf[2+5*i+2]);
-							dimg1[i+128].y = I14x2_I16(parsebuf[2+5*i+3],parsebuf[2+5*i+4]);
-						}
-					}
-					else
-					{
-						for(int i = 0; i < 128; i++)
-						{
-							dimg2[i+128].valid = parsebuf[2+5*i+0];
-							dimg2[i+128].x = I14x2_I16(parsebuf[2+5*i+1],parsebuf[2+5*i+2]);
-							dimg2[i+128].y = I14x2_I16(parsebuf[2+5*i+3],parsebuf[2+5*i+4]);
-						}
-					}
-				}
-				break;
-
 				case 0xa0:
 				{
-					double new_angle = (double)(I14x2_I16(parsebuf[2], parsebuf[3]));
+/*					double new_angle = (double)(I14x2_I16(parsebuf[2], parsebuf[3]));
 					new_angle = new_angle * 360.0 / 65536.0;
-/*					if(fabs(gyro_z) > 500.0)
-						cur_angle = (new_angle + 1.0*cur_angle)/2.0;
-					else if(fabs(gyro_z) > 250.0)
-						cur_angle = (new_angle + 3.0*cur_angle)/4.0;
-					else
-						cur_angle = (new_angle + 10.0*cur_angle)/11.0;
-*/
 					cur_angle = new_angle;
 					double new_compass = (double)(I14x2_I16(parsebuf[6], parsebuf[7]));
 					new_compass = new_compass * 360.0 / 65536.0;
@@ -1232,7 +1081,7 @@ int main(int argc, char** argv)
 
 					cur_x = I7x5_I32(parsebuf[8],parsebuf[9],parsebuf[10],parsebuf[11],parsebuf[12]);
 					cur_y = I7x5_I32(parsebuf[13],parsebuf[14],parsebuf[15],parsebuf[16],parsebuf[17]);
-
+*/
 				}
 				break;
 
@@ -1301,45 +1150,12 @@ int main(int argc, char** argv)
 			}
 		}
 
-		if(dev_show_lidars)
-		{
-			draw_lidar(win, dev_lidar_bef_in.scan, sf::Color(0,0,0), 5.0, ((double)dev_lidar_bef_in.angle/4294967296.0)*360.0, dev_lidar_bef_in.x, dev_lidar_bef_in.y);
-			draw_mini_robot(win, sf::Color(0,0,0), ((double)dev_lidar_bef_in.angle/4294967296.0)*360.0, dev_lidar_bef_in.x, dev_lidar_bef_in.y);
-			draw_lidar(win, dev_lidar_aft_in.scan, sf::Color(90,90,255), 3.0, ((double)dev_lidar_aft_in.angle/4294967296.0)*360.0, dev_lidar_aft_in.x, dev_lidar_aft_in.y);
-			draw_mini_robot(win, sf::Color(90,90,255), ((double)dev_lidar_aft_in.angle/4294967296.0)*360.0, dev_lidar_aft_in.x, dev_lidar_aft_in.y);
-			draw_lidar(win, dev_lidar_aft_out.scan, sf::Color(255,0,0), 1.0, ((double)dev_lidar_aft_out.angle/4294967296.0)*360.0, dev_lidar_aft_out.x, dev_lidar_aft_out.y);
-			draw_lidar(win, dev_lidar_aft_out_alt.scan, sf::Color(0,255,0), 1.0, ((double)dev_lidar_aft_out_alt.angle/4294967296.0)*360.0, 
-				dev_lidar_aft_out_alt.x, dev_lidar_aft_out_alt.y);
-		}
-		else
-		{
 		draw_robot(win);
-		for(int l = 0; l < NUM_LIDAR_SNAPSHOTS; l++)
-		{
-			if(dev_apply && special_idx_at_snapshot[l] == 3)
-			{
-				draw_lidar(win, lidar_snapshots[l], special_lidar_colors[special_idx_at_snapshot[l]], lidar_line_thick,
-					ang_at_snapshot[l]+(360*(double)dbg[3]/4294967296.0), x_at_snapshot[l]+dbg[4], y_at_snapshot[l]+dbg[5]);
 
-			}
-			else
-			{
-				draw_lidar(win, lidar_snapshots[l], special_lidar_colors[special_idx_at_snapshot[l]], lidar_line_thick,
-					ang_at_snapshot[l], x_at_snapshot[l], y_at_snapshot[l]);
-			}
-
-		}
-
-//		draw_dimg(win, dimg1, sf::Color(0, 128, 0, 128));
-//		draw_dimg(win, dimg2, sf::Color(0, 0, 128, 128));
-
-		draw_lidar(win, lidar_scan, sf::Color(30,15,0,100), lidar_line_thick, cur_angle_at_lidar_update, cur_x_at_lidar_update, cur_y_at_lidar_update);
+		draw_img(win, lidar_scan[cur_lidar_idx], sf::Color(200, 50, 50));
 
 		draw_sonars(win);
 		draw_texts(win);
-		}
-
-
 
 		win.display();
 
