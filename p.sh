@@ -15,7 +15,10 @@ motconb=4
 
 tooldir="/home/hrst/rn1-tools"
 
+lockfile="/home/hrst/rn1-host/rn1host.lock"
+
 logfile="${tooldir}/program_log.txt"
+
 
 
 # Actual firmware filenames expected
@@ -31,6 +34,13 @@ prog="${tooldir}/prog"
 mcprog="${tooldir}/mcprog"
 
 uart="/dev/serial0"
+
+	if [ -f "$lockfile" ]
+	then
+		echo "Error: rn1host lockfile in place, maybe it's running? ($lockfile)"
+		echo "Error: rn1host lockfile in place, maybe it's running? ($lockfile)" > $logfile
+		exit 1
+	fi
 
 	echo "Running programmer" > $logfile
 	echo "Running programmer"
