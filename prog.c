@@ -110,8 +110,10 @@ int main(int argc, char** argv)
 
 	set_uart_attribs(uart, B115200);
 
+	tcflush(uart, TCIFLUSH);
 	usleep(200000);
 	tcflush(uart, TCOFLUSH);
+	tcflush(uart, TCIFLUSH);
 
 	printf("Entering flasher...\n");
 
