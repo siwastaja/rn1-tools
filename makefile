@@ -17,3 +17,7 @@ udpserver: udpserver.c
 
 ros_publisher: ros_publisher.cc
 	g++ -Wall ros_publisher.cc -o ros_publisher
+
+tofdev: tofdev.cc
+	g++ -fpermissive -D_GLIBCXX_USE_CXX11_ABI=0 -Wall -c -o rn1client.o tofdev.cc
+	g++ -D_GLIBCXX_USE_CXX11_ABI=0 -o tofdev rn1client.o -L/usr/local/lib -lm -lsfml-graphics -lsfml-window -lsfml-system
