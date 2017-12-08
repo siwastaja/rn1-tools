@@ -143,6 +143,8 @@ int send_uart(uint8_t* buf, int len)
 	return 0;
 }
 
+float scaling = 4.0;
+
 typedef struct __attribute__((packed))
 {
 	// *4, then -1 to form the register values:
@@ -150,19 +152,26 @@ typedef struct __attribute__((packed))
 	uint16_t dist_int_len;
 
 	uint8_t clk_div; // 1 = 20MHz LED, 2 = 10 MHz...
+	uint8_t pll_shift; // delay in 12.5 ns/step , 0-12
+	uint8_t dll_shift; // delay in approx 2ns/step, 0-49
+
 } config_t;
 
 config_t config =  // active configuration
 {
 	.bw_int_len = 1000,
 	.dist_int_len = 1000,
-	.clk_div = 1
+	.clk_div = 1,
+	.pll_shift = 0,
+	.dll_shift = 0
 };
 
-
+void save_settings();
 void send_hw_settings()
 {
 	send_uart((uint8_t*)&config, sizeof(config_t));
+	save_settings();
+
 }
 
 
@@ -396,9 +405,19 @@ void draw_mono(sf::RenderWindow& win, float* img, int x_on_screen, int y_on_scre
 		int xx = (mir_x?(EPC_XS-1):0);
 		while(1)
 		{
-			pix[4*(yy*EPC_XS+xx)+0] =
-			pix[4*(yy*EPC_XS+xx)+1] =
-			pix[4*(yy*EPC_XS+xx)+2] = (img[i]+mono_offset)/mono_div;
+
+			if(img[i] == DATA_OVEREXP)
+			{
+				pix[4*(yy*EPC_XS+xx)+0] = 160;
+				pix[4*(yy*EPC_XS+xx)+1] = 0;
+				pix[4*(yy*EPC_XS+xx)+2] = 160;
+			}
+			else
+			{
+				pix[4*(yy*EPC_XS+xx)+0] =
+				pix[4*(yy*EPC_XS+xx)+1] =
+				pix[4*(yy*EPC_XS+xx)+2] = (img[i]+mono_offset)/mono_div;
+			}
 			pix[4*(yy*EPC_XS+xx)+3] = 255;
 			i++;
 			if( (mir_x && --xx<0) || (!mir_x && ++xx>=EPC_XS) ) break;
@@ -426,6 +445,7 @@ void draw_mono(sf::RenderWindow& win, float* img, int x_on_screen, int y_on_scre
 	win.draw(sprite);
 }
 
+float blue_dist = 3000.0;
 
 void draw_dist(sf::RenderWindow& win, float* img, int x_on_screen, int y_on_screen, float scale)
 {
@@ -452,7 +472,7 @@ void draw_dist(sf::RenderWindow& win, float* img, int x_on_screen, int y_on_scre
 			}
 			else
 			{
-				float percolor = 1000;
+				float percolor = blue_dist/3.0;
 
 				float mm = img[i];
 				float f_r = 1.0 - fabs(mm-0*percolor)/percolor;
@@ -506,9 +526,19 @@ void draw_dcs(sf::RenderWindow& win, float* img, int x_on_screen, int y_on_scree
 		int xx = (mir_x?(EPC_XS-1):0);
 		while(1)
 		{
-			pix[4*(yy*EPC_XS+xx)+0] =
-			pix[4*(yy*EPC_XS+xx)+1] =
-			pix[4*(yy*EPC_XS+xx)+2] = ((int16_t)img[i]+dcs_offset)/dcs_div;
+
+			if(img[i] == DATA_OVEREXP)
+			{
+				pix[4*(yy*EPC_XS+xx)+0] = 160;
+				pix[4*(yy*EPC_XS+xx)+1] = 0;
+				pix[4*(yy*EPC_XS+xx)+2] = 160;
+			}
+			else
+			{
+				pix[4*(yy*EPC_XS+xx)+0] =
+				pix[4*(yy*EPC_XS+xx)+1] =
+				pix[4*(yy*EPC_XS+xx)+2] = ((int16_t)img[i]+dcs_offset)/dcs_div;
+			}
 			pix[4*(yy*EPC_XS+xx)+3] = 255;
 			i++;
 			if( (mir_x && --xx<0) || (!mir_x && ++xx>=EPC_XS) ) break;
@@ -560,12 +590,14 @@ typedef struct
 	float min;
 	float avg;
 	float max;
+	int nvalid;
 
 	float val_at[N_AT_POINTS];
 	float avg9_at[N_AT_POINTS];
 	float avg49_at[N_AT_POINTS];
 	float noise49_at[N_AT_POINTS];
 } spatial_analysis_t;
+
 
 void draw_analysis(sf::RenderWindow& win, spatial_analysis_t *spat, int x_on_screen, int y_on_screen, float scale)
 {
@@ -629,21 +661,32 @@ void draw_analysis(sf::RenderWindow& win, spatial_analysis_t *spat, int x_on_scr
 	t.setCharacterSize(14);
 	t.setFillColor(sf::Color(255,255,255));
 
-	sprintf(buf, "min %4.0f  avg %6.1f  max %4.0f", spat->min, spat->avg, spat->max);
-	t.setString(buf);
-	t.setPosition(x_on_screen+2, y_on_screen+scale*EPC_YS+1*15);
-	win.draw(t);
 
-	sprintf(buf, "Point %d: val %4.0f", sel_at_point+1, spat->val_at[sel_at_point]);
-	t.setString(buf);
-	t.setPosition(x_on_screen+2, y_on_screen+scale*EPC_YS+2*15);
-	win.draw(t);
+	if(!rotated)
+	{
+		sprintf(buf, "valids %4d   min %4.0f   avg %6.1f   max %4.0f", spat->nvalid, spat->min, spat->avg, spat->max);
+		t.setString(buf);
+		t.setPosition(x_on_screen+2, y_on_screen+scale*EPC_YS+0*15);
+		win.draw(t);
 
-	sprintf(buf, "  avg9 %6.1f  avg49 %6.1f  spatnoise49 %6.1f", spat->avg9_at[sel_at_point], spat->avg49_at[sel_at_point], spat->noise49_at[sel_at_point]);
-	t.setString(buf);
-	t.setPosition(x_on_screen+2, y_on_screen+scale*EPC_YS+3*15);
-	win.draw(t);
+		sprintf(buf, "P%d: val %4.0f  avg9 %6.1f  avg49 %6.1f  spatnoise49 %6.1f", sel_at_point+1, spat->val_at[sel_at_point], spat->avg9_at[sel_at_point], spat->avg49_at[sel_at_point], spat->noise49_at[sel_at_point]);
+		t.setString(buf);
+		t.setPosition(x_on_screen+2, y_on_screen+scale*EPC_YS+1*15);
+		win.draw(t);
+	}
+	else
+	{
+		sprintf(buf, "valids %4d\nmin %4.0f\navg %6.1f\nmax %4.0f", spat->nvalid, spat->min, spat->avg, spat->max);
+		t.setString(buf);
+		t.setPosition(x_on_screen+2, y_on_screen+scale*EPC_XS+0*15);
+		win.draw(t);
 
+		sprintf(buf, "P%d: val %4.0f\navg9 %6.1f\navg49 %6.1f\nspatnoise49 %6.1f", sel_at_point+1, spat->val_at[sel_at_point], spat->avg9_at[sel_at_point], spat->avg49_at[sel_at_point], spat->noise49_at[sel_at_point]);
+		t.setString(buf);
+		t.setPosition(x_on_screen+2, y_on_screen+scale*EPC_XS+5*15);
+		win.draw(t);
+
+	}
 }
 
 #define sq(x) ((x)*(x))
@@ -659,12 +702,16 @@ void analyze_mono(float* img, spatial_analysis_t *spat)
 		for(int xx=0; xx<EPC_XS; xx++)
 		{
 			double val = img[yy*EPC_XS+xx];
+
+			if(val == DATA_LOW || val == DATA_OVEREXP)
+				continue;
 			accum += val;
 			accum_cnt++;
 			if(val > max) max = val;
 			if(val < min) min = val; 
 		}
 	}
+	spat->nvalid = accum_cnt;
 	spat->min = min;
 	spat->max = max;
 	spat->avg = accum/accum_cnt;
@@ -684,11 +731,20 @@ void analyze_mono(float* img, spatial_analysis_t *spat)
 		// things requiring 9 pixel area:
 
 		double accum9 = 0.0;
-		for(int yy = at_points[i][1]-1; yy < at_points[i][1]+1; yy++)
-			for(int xx = at_points[i][0]-1; xx < at_points[i][0]+1; xx++)
-				accum9 += img[yy*EPC_XS+xx];
+		accum_cnt = 0;
+		for(int yy = at_points[i][1]-1; yy <= at_points[i][1]+1; yy++)
+		{
+			for(int xx = at_points[i][0]-1; xx <= at_points[i][0]+1; xx++)
+			{
+				double val = img[yy*EPC_XS+xx];
+				if(val == DATA_LOW || val == DATA_OVEREXP)
+					continue;
+				accum_cnt++;
+				accum9 += val;
 
-		spat->avg9_at[i] = accum9/9.0;
+			}
+		}
+		spat->avg9_at[i] = accum9/accum_cnt;
 		
 		if(at_points[i][0] < 3 || at_points[i][0] >= EPC_XS-3 || at_points[i][1] < 3 || at_points[i][1] >= EPC_YS-3)
 			continue;
@@ -696,25 +752,35 @@ void analyze_mono(float* img, spatial_analysis_t *spat)
 		// things requiring 49 pixel area:
 
 		double accum49 = 0.0;
-		for(int yy = at_points[i][1]-3; yy < at_points[i][1]+3; yy++)
+		accum_cnt = 0;
+		for(int yy = at_points[i][1]-3; yy <= at_points[i][1]+3; yy++)
 		{
-			for(int xx = at_points[i][0]-3; xx < at_points[i][0]+3; xx++)
+			for(int xx = at_points[i][0]-3; xx <= at_points[i][0]+3; xx++)
 			{
+				double val = img[yy*EPC_XS+xx];
+				if(val == DATA_LOW || val == DATA_OVEREXP)
+					continue;
+				accum_cnt++;
 				accum49 += img[yy*EPC_XS+xx];
 			}
 		}
-		double avg49 = accum9/49.0;
+		double avg49 = accum49/accum_cnt;
 		spat->avg49_at[i] = avg49;
 
 		double deviation_accum = 0.0;
-		for(int yy = at_points[i][1]-3; yy < at_points[i][1]+3; yy++)
+		accum_cnt = 0;
+		for(int yy = at_points[i][1]-3; yy <= at_points[i][1]+3; yy++)
 		{
-			for(int xx = at_points[i][0]-3; xx < at_points[i][0]+3; xx++)
+			for(int xx = at_points[i][0]-3; xx <= at_points[i][0]+3; xx++)
 			{
+				double val = img[yy*EPC_XS+xx];
+				if(val == DATA_LOW || val == DATA_OVEREXP)
+					continue;
+				accum_cnt++;
 				deviation_accum += sq(avg49-img[yy*EPC_XS+xx]);
 			}
 		}
-		spat->noise49_at[i] = sqrt(deviation_accum/49.0);
+		spat->noise49_at[i] = sqrt(deviation_accum/accum_cnt);
 	}
 
 }
@@ -728,6 +794,9 @@ typedef struct
 	void (*draw_func)(sf::RenderWindow&, float*, int, int, float);
 	void (*analysis_func)(float*, spatial_analysis_t*);	
 	void (*draw_analysis_func)(sf::RenderWindow&, spatial_analysis_t*, int, int, float);
+	int x_on_screen;
+	int y_on_screen;
+	float scale;
 } screen_img_t;
 
 screen_img_t mono = {"Ambient light",sf::Color(255,255,255,255), {0}, {0}, &draw_mono, &analyze_mono, &draw_analysis};
@@ -739,10 +808,79 @@ screen_img_t dcs[4] = {
 
 screen_img_t dist_sw = {"Software distance",sf::Color(255,255,255,255), {0}, {0}, &draw_dist, &analyze_mono, &draw_analysis};
 
+#define NUM_SCREEN_IMGS 6
+screen_img_t *screen_imgs[NUM_SCREEN_IMGS] =
+{
+	&mono,
+	&dcs[0],
+	&dcs[1],
+	&dcs[2],
+	&dcs[3],
+	&dist_sw
+};
+
+float offsets[7] =
+{
+	0,
+	0, //-2.500,
+	0, //-2.500-0.660,
+	0, //-2.500-1.020,
+	0, //-2.500-1.060,
+	0,
+	0, //-2.500-0.900
+};
+
+int check_mouse_hit_mark(int ms, int my)
+{
+	for(int img_idx=0; img_idx < NUM_SCREEN_IMGS; img_idx++)
+	{
+		screen_img_t *img = screen_imgs[img_idx];
+		for(int i=0; i<N_AT_POINTS; i++)
+		{
+			if(at_points[i][0] < 0 || at_points[i][0] >= EPC_XS || at_points[i][1] < 0 || at_points[i][1] >= EPC_YS)
+				continue;
+
+			float xprepre = at_points[i][0]+0.5;
+			float yprepre = at_points[i][1]+0.5;
+
+			float xpre = img->scale*(mir_x?(EPC_XS-xprepre):xprepre);
+			float ypre = img->scale*(mir_y?(EPC_YS-yprepre):yprepre);
+			float x,y;
+			if(rotated)
+			{
+				x = img->scale*EPC_YS-ypre;
+				y = xpre;
+			}
+			else
+			{
+				x = xpre;
+				y = ypre;
+			}
+
+			if(ms > (img->x_on_screen+x)-5 && ms < (img->x_on_screen+x)+5 &&
+			   my > (img->y_on_screen+y)-5 && my < (img->y_on_screen+y)+5)
+			{
+				printf("Click in imgidx=%d on point %d\n", img_idx, i);
+				return i;
+			}
+		}
+	}
+
+	return -1;
+}
+
+
 void calc_dist()
 {
-	const float fled = 20000000.0;
-	const float mult = 299792458.0/2.0*1.0/(2.0*M_PI*fled);
+	if(config.clk_div < 1 || config.clk_div > 6)
+	{
+		printf("Illegal clk_div\n");
+		return;
+	}
+
+	float fled = 20000000.0 / config.clk_div;
+	float mult = 299792458.0/2.0*1.0/(2.0*M_PI*fled); 
+	float unamb = 299792458.0/2.0*1.0/(fled); 
 
 	for(int i=0; i<EPC_XS*EPC_YS; i++)
 	{
@@ -754,19 +892,38 @@ void calc_dist()
 		float dcs31 = dcs3-dcs1;
 		float dcs20 = dcs2-dcs0;
 
-		float dist = (mult * (M_PI + atan2(dcs31,dcs20)))-2.500;
-		if(dist < 0.0) dist = 0.0;
+		float dist = (mult * (M_PI + atan2(dcs31,dcs20)))+offsets[config.clk_div];
+
+		if(dist < 0.0) dist += unamb;
+		else if(dist > unamb) dist -= unamb;
 
 		float ampl = sqrt(sq(dcs20)+sq(dcs31))/2.0;
 
 
-		if(ampl < 75)
-			dist_sw.data[i] = DATA_LOW;
-		else if(dcs0 < -2046.0 || dcs1 < -2046.0 || dcs2 < -2046.0 || dcs3 < -2046.0 || dcs0 > 2045.0 || dcs1 > 2045.0 || dcs2 > 2045.0 || dcs3 > 2045.0)
+		if(dcs0 < -2046.0 || dcs1 < -2046.0 || dcs2 < -2046.0 || dcs3 < -2046.0 || dcs0 > 2045.0 || dcs1 > 2045.0 || dcs2 > 2045.0 || dcs3 > 2045.0)
 			dist_sw.data[i] = DATA_OVEREXP;
+		else if(ampl < 75)
+			dist_sw.data[i] = DATA_LOW;
 		else
+		{
 			dist_sw.data[i] = dist*1000.0;
+		}
 	}
+}
+
+void addj_offset(float amount)
+{
+	if(config.clk_div < 1 || config.clk_div > 6)
+	{
+		printf("Illegal clk_div\n");
+		return;
+	}
+
+	offsets[config.clk_div] += amount;
+
+	calc_dist();
+	dist_sw.analysis_func(dist_sw.data, &dist_sw.spatial_analysis);
+
 }
 
 void gen_test_img()
@@ -778,41 +935,62 @@ void gen_test_img()
 	mono.analysis_func(mono.data, &mono.spatial_analysis);
 }
 
-void draw_screen_img(sf::RenderWindow& win, screen_img_t* img, int x, int y, float scale)
+void draw_screen_img(sf::RenderWindow& win, screen_img_t* img)
 {
-	img->draw_func(win, img->data, x, y, scale);
-	img->draw_analysis_func(win, &img->spatial_analysis, x, y, scale);
+	img->draw_func(win, img->data, img->x_on_screen, img->y_on_screen, img->scale);
+	img->draw_analysis_func(win, &img->spatial_analysis, img->x_on_screen, img->y_on_screen, img->scale);
 
 	sf::Text t;
 	t.setFont(arial);
 	t.setString(img->title);
 	t.setCharacterSize(14);
 	t.setFillColor(img->title_color);
-	t.setPosition(x+2, y+(rotated?EPC_XS:EPC_YS)*scale);
+	t.setPosition(img->x_on_screen+2, img->y_on_screen+(rotated?EPC_XS:EPC_YS)*img->scale-15);
 	win.draw(t);
 }
 
 void draw_horiz(sf::RenderWindow& win)
 {
-	float scale = 4.0;
+	float scale = scaling;
 
-	draw_screen_img(win, &mono, 10, 10, scale);
-	draw_screen_img(win, &dist_sw, 10+scale*EPC_XS+20, 10, scale);
-	draw_screen_img(win, &dcs[0], 10, 10+scale*EPC_YS+100, scale);
-	draw_screen_img(win, &dcs[1], 10+scale*EPC_XS+20, 10+scale*EPC_YS+100, scale);
-	draw_screen_img(win, &dcs[2], 10, 10+2.0*scale*EPC_YS+200, scale);
-	draw_screen_img(win, &dcs[3], 10+scale*EPC_XS+20, 10+2.0*scale*EPC_YS+200, scale);
+	mono.x_on_screen = dcs[0].x_on_screen = dcs[2].x_on_screen = 10;
+	dist_sw.x_on_screen = dcs[1].x_on_screen = dcs[3].x_on_screen = 10+scale*EPC_XS+20;
+
+	mono.y_on_screen = dist_sw.y_on_screen = 10;
+	dcs[0].y_on_screen = dcs[1].y_on_screen = 10+scale*EPC_YS+70;
+	dcs[2].y_on_screen = dcs[3].y_on_screen = 10+2.0*(scale*EPC_YS+70);
+	mono.scale = dist_sw.scale = dcs[0].scale = dcs[1].scale = dcs[2].scale = dcs[3].scale = scale;
+
+
+	for(int img_idx=0; img_idx < NUM_SCREEN_IMGS; img_idx++)
+	{
+		draw_screen_img(win, screen_imgs[img_idx]);
+	}
 }
 
 void draw_vert(sf::RenderWindow& win)
 {
-	float scale = 4.0;
+	float scale = scaling;
 
-	draw_screen_img(win, &mono,   10, 10, scale);
-//	draw_screen_img(win, &dcs[0], 10+1.0*scale*EPC_YS+20, 10, scale);
-//	draw_screen_img(win, &dcs[1], 10+2.0*scale*EPC_YS+40, 10, scale);
-//	draw_screen_img(win, &dcs[2], 10+3.0*scale*EPC_YS+60, 10, scale);
-//	draw_screen_img(win, &dcs[3], 10+4.0*scale*EPC_YS+80, 10, scale);
+	for(int img_idx=0; img_idx < NUM_SCREEN_IMGS; img_idx++)
+	{
+		screen_imgs[img_idx]->x_on_screen = 10+img_idx*(scale*EPC_YS+15);
+		screen_imgs[img_idx]->y_on_screen = 10;
+		screen_imgs[img_idx]->scale = scale;
+
+		draw_screen_img(win, screen_imgs[img_idx]);
+	}
+
+
+/*
+	draw_screen_img(win, &mono, 10, 10, scale);
+	draw_screen_img(win, &dist_sw, 10+1*(scale*EPC_YS+15), 10, scale);
+	draw_screen_img(win, &dcs[0],  10+2*(scale*EPC_YS+15), 10, scale);
+	draw_screen_img(win, &dcs[1],  10+3*(scale*EPC_YS+15), 10, scale);
+	draw_screen_img(win, &dcs[2],  10+4*(scale*EPC_YS+15), 10, scale);
+	draw_screen_img(win, &dcs[3],  10+5*(scale*EPC_YS+15), 10, scale);
+*/
+
 }
 
 #define BW_MSG_SIZE ((EPC_XS)*(EPC_YS)*3/2)
@@ -851,6 +1029,9 @@ int parse_uart_msg(uint8_t* buf, int msgid, int len)
 					//if(val1 < 0) val1 = 0;
 					//if(val2 < 0) val2 = 0;
 
+					if(val1 < -2047 || val1 > 2046) val1 = DATA_OVEREXP;
+					if(val2 < -2047 || val2 > 2046) val2 = DATA_OVEREXP;
+
 					dest->data[yy*EPC_XS+xx] = val1;
 					dest->data[yy*EPC_XS+xx+1] = val2;
 					i+=3;
@@ -882,11 +1063,35 @@ int parse_uart_msg(uint8_t* buf, int msgid, int len)
 	return 0;
 }
 
+void save_settings()
+{
+	FILE* f_save = fopen("saved_settings", "w");
+	if(f_save)
+	{
+		fwrite(offsets, sizeof(offsets), 1, f_save);
+		fwrite(&config, sizeof(config), 1, f_save);
+		fclose(f_save);
+	}
+}
+
+void restore_settings()
+{
+	FILE* f_save = fopen("saved_settings", "r");
+	if(f_save)
+	{
+		fread(offsets, sizeof(offsets), 1, f_save);
+		fread(&config, sizeof(config), 1, f_save);
+		fclose(f_save);
+	}
+}
 
 int main(int argc, char** argv)
 {
+
+	restore_settings();
+
 	gen_test_img();
-	int focus = 1;
+//	int focus = 1;
 	#ifdef USE_UART
 	if(init_uart())
 	{
@@ -960,12 +1165,12 @@ int main(int argc, char** argv)
 				sf::FloatRect visibleArea(0, 0, screen_x, screen_y);
 				win.setView(sf::View(visibleArea));
 			}
-			if(event.type == sf::Event::LostFocus)
+/*			if(event.type == sf::Event::LostFocus)
 				focus = 0;
 
 			if(event.type == sf::Event::GainedFocus)
 				focus = 1;
-
+*/
 			if(event.type == sf::Event::KeyPressed)
 			{
 				if(event.key.code == sf::Keyboard::X)
@@ -985,43 +1190,162 @@ int main(int argc, char** argv)
 				else if(event.key.code == sf::Keyboard::Num9) sel_at_point = 8;
 				else if(event.key.code == sf::Keyboard::Up)
 				{
-					int t = ((float)config.bw_int_len*1.41);
-					if(t < 10) t = 10;
-					else if(t > 16384) t = 16384;
-					config.bw_int_len = t;
+					if(sf::Keyboard::isKeyPressed(sf::Keyboard::LShift) || sf::Keyboard::isKeyPressed(sf::Keyboard::RShift) )
+					{
+						int t = ((float)config.bw_int_len*1.189207115);
+						if(t < 10) t = 10;
+						else if(t > 16384) t = 16384;
+						config.bw_int_len = t;
+					}
+					else
+					{
+						int t = ((float)config.dist_int_len*1.189207115);
+						if(t < 10) t = 10;
+						else if(t > 16384) t = 16384;
+						config.dist_int_len = t;
+					}
 					send_hw_settings();
 				}
 				else if(event.key.code == sf::Keyboard::Down)
 				{
-					int t = ((float)config.bw_int_len/1.41);
-					if(t < 10) t = 10;
-					else if(t > 16384) t = 16384;
-					config.bw_int_len = t;
+					if(sf::Keyboard::isKeyPressed(sf::Keyboard::LShift) || sf::Keyboard::isKeyPressed(sf::Keyboard::RShift) )
+					{
+						int t = ((float)config.bw_int_len/1.189207115);
+						if(t < 10) t = 10;
+						else if(t > 16384) t = 16384;
+						config.bw_int_len = t;
+					}
+					else
+					{
+						int t = ((float)config.dist_int_len/1.189207115);
+						if(t < 10) t = 10;
+						else if(t > 16384) t = 16384;
+						config.dist_int_len = t;
+					}
 					send_hw_settings();
 				}
 				else if(event.key.code == sf::Keyboard::Right)
 				{
-					int t = ((float)config.dist_int_len*1.41);
-					if(t < 10) t = 10;
-					else if(t > 16384) t = 16384;
-					config.dist_int_len = t;
-					send_hw_settings();
+					addj_offset((sf::Keyboard::isKeyPressed(sf::Keyboard::LShift) || sf::Keyboard::isKeyPressed(sf::Keyboard::RShift))?+0.02:+0.2);
+					save_settings();
+
 				}
 				else if(event.key.code == sf::Keyboard::Left)
 				{
-					int t = ((float)config.dist_int_len/1.41);
-					if(t < 10) t = 10;
-					else if(t > 16384) t = 16384;
-					config.dist_int_len = t;
+					addj_offset((sf::Keyboard::isKeyPressed(sf::Keyboard::LShift) || sf::Keyboard::isKeyPressed(sf::Keyboard::RShift))?-0.02:-0.2);
+					save_settings();
+				}
+				else if(event.key.code == sf::Keyboard::F1)
+				{
+					config.clk_div = 1;
 					send_hw_settings();
 				}
+				else if(event.key.code == sf::Keyboard::F2)
+				{
+					config.clk_div = 2;
+					send_hw_settings();
+				}
+				else if(event.key.code == sf::Keyboard::F3)
+				{
+					config.clk_div = 3;
+					send_hw_settings();
+				}
+				else if(event.key.code == sf::Keyboard::F4)
+				{
+					config.clk_div = 4;
+					send_hw_settings();
+				}
+				else if(event.key.code == sf::Keyboard::F5)
+				{
+					config.clk_div = 6;
+					send_hw_settings();
+				}
+				else if(event.key.code == sf::Keyboard::PageUp)
+				{
+					if(sf::Keyboard::isKeyPressed(sf::Keyboard::LShift) || sf::Keyboard::isKeyPressed(sf::Keyboard::RShift) )
+						scaling *= 1.025;
+					else
+						blue_dist += 500.0;
+				}
+				else if(event.key.code == sf::Keyboard::PageDown)
+				{
+					if(sf::Keyboard::isKeyPressed(sf::Keyboard::LShift) || sf::Keyboard::isKeyPressed(sf::Keyboard::RShift) )
+						scaling /= 1.025;
+					else
+						blue_dist -= 500.0;
+				}
+				else if(event.key.code == sf::Keyboard::Comma)
+				{
+					if(sf::Keyboard::isKeyPressed(sf::Keyboard::LShift) || sf::Keyboard::isKeyPressed(sf::Keyboard::RShift) )
+					{ if(config.dll_shift > 0) config.dll_shift--; }
+					else
+					{ if(config.pll_shift > 0) config.pll_shift--; }
+					send_hw_settings();
+
+				}
+				else if(event.key.code == sf::Keyboard::Period)
+				{
+					if(sf::Keyboard::isKeyPressed(sf::Keyboard::LShift) || sf::Keyboard::isKeyPressed(sf::Keyboard::RShift) )
+					{ if(config.dll_shift < 49) config.dll_shift++; }
+					else
+					{ if(config.pll_shift < 12) config.pll_shift++; }
+					send_hw_settings();
+				}
+
 			}
 
 		}
 
 
-		//if(sf::Keyboard::isKeyPressed(sf::Keyboard::X))
+		sf::Vector2i mouse_pos = sf::Mouse::getPosition(win);
 
+		static bool mouse_was_pressed = false;
+		static int drag_idx = -1;
+		static int drag_start_x, drag_start_y;
+		if(sf::Mouse::isButtonPressed(sf::Mouse::Left))
+		{
+			if(!mouse_was_pressed)
+			{
+				if( (drag_idx = check_mouse_hit_mark(mouse_pos.x, mouse_pos.y)) >= 0 )
+				{
+					drag_start_x = mouse_pos.x;
+					drag_start_y = mouse_pos.y;
+				}
+			}
+			else
+			{
+
+				if(drag_idx >= 0)
+				{
+
+					int dx = mouse_pos.x - drag_start_x;
+					int dy = mouse_pos.y - drag_start_y;
+
+					if(rotated)
+					{
+						int tmp = -1*dx;
+						dx = dy;
+						dy = tmp;
+					}
+
+
+					at_points[drag_idx][0] += (mir_x?-1:1)*dx;
+					at_points[drag_idx][1] += (mir_y?-1:1)*dy;
+
+					drag_start_x = mouse_pos.x;
+					drag_start_y = mouse_pos.y;
+				
+				}
+
+			}
+			mouse_was_pressed = true;
+		}
+		else
+		{
+			mouse_was_pressed = false;
+
+			drag_idx = -1;
+		}
 
 		win.clear(sf::Color(128,128,128));
 		if(rotated)
@@ -1037,9 +1361,14 @@ int main(int argc, char** argv)
 		t.setCharacterSize(14);
 		t.setFillColor(sf::Color(255,255,255));
 
-		sprintf(buf, "bw_int_len=%5d dist_int_len=%5d clk_div=%d\n", config.bw_int_len, config.dist_int_len, config.clk_div);
+		sprintf(buf, "bw_int_len=%5d dist_int_len=%5d clk_div=%d (%5.2fMHz) pll_shift=%2d(%5.2fm) dll_shift=%2d(~%5.2fm) blue_dist=%5.0f\n", 
+			config.bw_int_len, config.dist_int_len,
+			config.clk_div, 20.0/config.clk_div,
+			config.pll_shift, config.pll_shift*0.299792458*12.5,
+			config.dll_shift, config.dll_shift*0.299792458*2.0,
+			blue_dist);
 		t.setString(buf);
-		t.setPosition(5, screen_y-15);
+		t.setPosition(5, screen_y-17);
 		win.draw(t);
 
 		win.display();
