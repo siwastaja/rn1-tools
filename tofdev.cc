@@ -26,9 +26,17 @@
 #define DATA_LOW 65534
 #define DATA_OVEREXP 65535
 
+bool show_software_dist = false;
 
 #define USE_UART
 
+bool saving = false;
+int save_idx = 0;
+int save_samples = 0;
+
+FILE *csv;
+
+float ampl_mask_lvl = 10.0;
 
 /* Open serial port in raw mode, with custom baudrate if necessary */
 int serial_open(const char *device, int rate)
@@ -155,6 +163,8 @@ typedef struct __attribute__((packed))
 	uint8_t pll_shift; // delay in 12.5 ns/step , 0-12
 	uint8_t dll_shift; // delay in approx 2ns/step, 0-49
 
+	int16_t offsets[7];
+
 } config_t;
 
 config_t config =  // active configuration
@@ -166,9 +176,26 @@ config_t config =  // active configuration
 	.dll_shift = 0
 };
 
+// Software calculation offsets:
+float offsets[7] =
+{
+	0,
+	0, //-2.500,
+	0, //-2.500-0.660,
+	0, //-2.500-1.020,
+	0, //-2.500-1.060,
+	0,
+	0, //-2.500-0.900
+};
+
+
 void save_settings();
 void send_hw_settings()
 {
+	// conv SW offsets to HW offsets:
+	for(int i=0; i<7; i++)
+		config.offsets[i] = offsets[i]*1000.0;
+
 	send_uart((uint8_t*)&config, sizeof(config_t));
 	save_settings();
 
@@ -394,6 +421,9 @@ int mono_div = 8;
 int dcs_offset = 2048;
 int dcs_div = 16;
 
+float amplitude_offset = 0.0;
+float amplitude_div = 1.0;
+
 void draw_mono(sf::RenderWindow& win, float* img, int x_on_screen, int y_on_screen, float scale)
 {
 	static uint8_t pix[EPC_XS*EPC_YS*4];
@@ -445,9 +475,7 @@ void draw_mono(sf::RenderWindow& win, float* img, int x_on_screen, int y_on_scre
 	win.draw(sprite);
 }
 
-float blue_dist = 3000.0;
-
-void draw_dist(sf::RenderWindow& win, float* img, int x_on_screen, int y_on_screen, float scale)
+void draw_amplitude(sf::RenderWindow& win, float* img, int x_on_screen, int y_on_screen, float scale)
 {
 	static uint8_t pix[EPC_XS*EPC_YS*4];
 
@@ -458,36 +486,11 @@ void draw_dist(sf::RenderWindow& win, float* img, int x_on_screen, int y_on_scre
 		int xx = (mir_x?(EPC_XS-1):0);
 		while(1)
 		{
-			if(img[i] == DATA_LOW)
-			{
-				pix[4*(yy*EPC_XS+xx)+0] = 0;
-				pix[4*(yy*EPC_XS+xx)+1] = 0;
-				pix[4*(yy*EPC_XS+xx)+2] = 128;
-			}
-			else if(img[i] == DATA_OVEREXP)
-			{
-				pix[4*(yy*EPC_XS+xx)+0] = 160;
-				pix[4*(yy*EPC_XS+xx)+1] = 0;
-				pix[4*(yy*EPC_XS+xx)+2] = 160;
-			}
-			else
-			{
-				float percolor = blue_dist/3.0;
 
-				float mm = img[i];
-				float f_r = 1.0 - fabs(mm-0*percolor)/percolor;
-				float f_g = 1.0 - fabs(mm-1*percolor)/percolor;
-				float f_b = 1.0 - fabs(mm-2*percolor)/percolor;
+			pix[4*(yy*EPC_XS+xx)+0] =
+			pix[4*(yy*EPC_XS+xx)+1] =
+			pix[4*(yy*EPC_XS+xx)+2] = (img[i]+amplitude_offset)/amplitude_div;
 
-				int r = f_r*256.0; if(r<0) r=0; else if(r>255) r=255;
-				int g = f_g*256.0; if(g<0) g=0; else if(g>255) g=255;
-				int b = f_b*256.0; if(b<0) b=0; else if(b>255) b=255;
-
-
-				pix[4*(yy*EPC_XS+xx)+0] = r;
-				pix[4*(yy*EPC_XS+xx)+1] = g;
-				pix[4*(yy*EPC_XS+xx)+2] = b;
-			}
 			pix[4*(yy*EPC_XS+xx)+3] = 255;
 			i++;
 			if( (mir_x && --xx<0) || (!mir_x && ++xx>=EPC_XS) ) break;
@@ -514,6 +517,11 @@ void draw_dist(sf::RenderWindow& win, float* img, int x_on_screen, int y_on_scre
 	}
 	win.draw(sprite);
 }
+
+
+float blue_dist = 3000.0;
+
+void draw_dist(sf::RenderWindow& win, float* img, int x_on_screen, int y_on_screen, float scale);
 
 void draw_dcs(sf::RenderWindow& win, float* img, int x_on_screen, int y_on_screen, float scale)
 {
@@ -806,29 +814,144 @@ screen_img_t dcs[4] = {
 	{"DCS2",sf::Color(255,255,255,255), {0}, {0}, &draw_dcs, &analyze_mono, &draw_analysis},
 	{"DCS3",sf::Color(255,255,255,255), {0}, {0}, &draw_dcs, &analyze_mono, &draw_analysis}};
 
-screen_img_t dist_sw = {"Software distance",sf::Color(255,255,255,255), {0}, {0}, &draw_dist, &analyze_mono, &draw_analysis};
+screen_img_t dist_sw = {"Hardware distance",sf::Color(255,255,255,255), {0}, {0}, &draw_dist, &analyze_mono, &draw_analysis};
+screen_img_t ampl_sw = {"Hardware amplitude",sf::Color(255,255,255,255), {0}, {0}, &draw_amplitude, &analyze_mono, &draw_analysis};
+
+void save_analysis_header()
+{
+	if(!csv) return;
+
+	fprintf(csv, "\nsave_idx;%d\nbw_int_len;%5d\ndist_int_len;%5d\nclk_div;%d;%5.2f\npll_shift;%2d;%5.2f\ndll_shift;%2d;%5.2f;\nblue_dist;%5.0f\noffset;%6d\nampl_mask;%5.1f\n",
+		save_idx,
+		config.bw_int_len, config.dist_int_len,
+		config.clk_div, 20.0/config.clk_div,
+		config.pll_shift, config.pll_shift*0.299792458*12.5,
+		config.dll_shift, config.dll_shift*0.299792458*2.0,
+		blue_dist, config.offsets[config.clk_div], ampl_mask_lvl);
+
+
+	for(int j=0; j<2; j++)
+	{
+		static const char names[2][5] = {"DIST", "AMPL"};
+
+		fprintf(csv, ";%s;nvalid;min;avg;max", names[j]);
+		for(int i=0; i<N_AT_POINTS; i++)
+		{
+			if(at_points[i][0] < 0 || at_points[i][0] >= EPC_XS || at_points[i][1] < 0 || at_points[i][1] >= EPC_YS)
+				continue;
+			fprintf(csv, ";P%d;val;avg9;avg49;noise49", i);
+		}
+	}
+
+	fprintf(csv, "\n");
+}
+
+void save_analysis_line()
+{
+	if(!csv) return;
+
+	for(int j=0; j<2; j++)
+	{
+		spatial_analysis_t *a;
+		if(j==0)
+			a = &dist_sw.spatial_analysis;
+		else
+			a = &ampl_sw.spatial_analysis;
+
+		static const char names[2][5] = {"DIST", "AMPL"};
+
+		fprintf(csv, ";%s;%d;%.0f;%.1f;%.0f", names[j], a->nvalid, a->min, a->avg, a->max);
+		for(int i=0; i<N_AT_POINTS; i++)
+		{
+			if(at_points[i][0] < 0 || at_points[i][0] >= EPC_XS || at_points[i][1] < 0 || at_points[i][1] >= EPC_YS)
+				continue;
+			fprintf(csv, ";P%d;%.0f;%.1f;%.1f;%.1f", i, a->val_at[i], a->avg9_at[i], a->avg49_at[i], a->noise49_at[i]);
+		}
+	}
+	fprintf(csv, "\n");
+	save_samples++;
+}
 
 #define NUM_SCREEN_IMGS 6
 screen_img_t *screen_imgs[NUM_SCREEN_IMGS] =
 {
 	&mono,
+	&dist_sw,
 	&dcs[0],
-	&dcs[1],
+	&ampl_sw, //&dcs[1],
 	&dcs[2],
 	&dcs[3],
-	&dist_sw
 };
 
-float offsets[7] =
+bool use_ampl_img = false;
+void draw_dist(sf::RenderWindow& win, float* img, int x_on_screen, int y_on_screen, float scale)
 {
-	0,
-	0, //-2.500,
-	0, //-2.500-0.660,
-	0, //-2.500-1.020,
-	0, //-2.500-1.060,
-	0,
-	0, //-2.500-0.900
-};
+	static uint8_t pix[EPC_XS*EPC_YS*4];
+
+	int i = 0;
+	int yy = (mir_y?(EPC_YS-1):0);
+
+	while(1)
+	{
+		int xx = (mir_x?(EPC_XS-1):0);
+		while(1)
+		{
+			if((use_ampl_img && (ampl_sw.data[i] == 0)) || (!use_ampl_img && img[i] == DATA_OVEREXP))
+			{
+				pix[4*(yy*EPC_XS+xx)+0] = 160;
+				pix[4*(yy*EPC_XS+xx)+1] = 0;
+				pix[4*(yy*EPC_XS+xx)+2] = 160;
+			}
+			else if((use_ampl_img && ampl_sw.data[i] < ampl_mask_lvl) || (!use_ampl_img && img[i] == DATA_LOW))
+			{
+				pix[4*(yy*EPC_XS+xx)+0] = 0;
+				pix[4*(yy*EPC_XS+xx)+1] = 0;
+				pix[4*(yy*EPC_XS+xx)+2] = 128;
+			}
+			else
+			{
+				float percolor = blue_dist/3.0;
+
+				float mm = img[i];
+				float f_r = 1.0 - fabs(mm-0*percolor)/percolor;
+				float f_g = 1.0 - fabs(mm-1*percolor)/percolor;
+				float f_b = 1.0 - fabs(mm-2*percolor)/percolor;
+
+				int r = f_r*256.0; if(r<0) r=0; else if(r>255) r=255;
+				int g = f_g*256.0; if(g<0) g=0; else if(g>255) g=255;
+				int b = f_b*256.0; if(b<0) b=0; else if(b>255) b=255;
+
+
+				pix[4*(yy*EPC_XS+xx)+0] = r;
+				pix[4*(yy*EPC_XS+xx)+1] = g;
+				pix[4*(yy*EPC_XS+xx)+2] = b;
+			}
+			pix[4*(yy*EPC_XS+xx)+3] = 255;
+			i++;
+			if( (mir_x && --xx<0) || (!mir_x && ++xx>=EPC_XS) ) break;
+		}
+		if( (mir_y && --yy<0) || (!mir_y && ++yy>=EPC_YS) ) break;
+	}
+
+	sf::Texture t;
+	t.create(EPC_XS, EPC_YS);
+	t.setSmooth(false);
+	t.update(pix);
+	sf::Sprite sprite;
+	sprite.setTexture(t);
+	sprite.setPosition((float)x_on_screen, (float)y_on_screen);
+	sprite.setScale(sf::Vector2f(scale, scale));
+	if(rotated)
+	{
+		sprite.setRotation(90.0);
+		sprite.setPosition(x_on_screen+EPC_YS*scale, y_on_screen);
+	}
+	else
+	{
+		sprite.setPosition(x_on_screen, y_on_screen);
+	}
+	win.draw(sprite);
+}
 
 int check_mouse_hit_mark(int ms, int my)
 {
@@ -892,7 +1015,7 @@ void calc_dist()
 		float dcs31 = dcs3-dcs1;
 		float dcs20 = dcs2-dcs0;
 
-		float dist = (mult * (M_PI + atan2(dcs31,dcs20)))+offsets[config.clk_div];
+		float dist = (mult * (/*M_PI +*/ atan2(dcs31,dcs20)))+offsets[config.clk_div];
 
 		if(dist < 0.0) dist += unamb;
 		else if(dist > unamb) dist -= unamb;
@@ -924,6 +1047,8 @@ void addj_offset(float amount)
 	calc_dist();
 	dist_sw.analysis_func(dist_sw.data, &dist_sw.spatial_analysis);
 
+	send_hw_settings();
+
 }
 
 void gen_test_img()
@@ -953,17 +1078,21 @@ void draw_horiz(sf::RenderWindow& win)
 {
 	float scale = scaling;
 
-	mono.x_on_screen = dcs[0].x_on_screen = dcs[2].x_on_screen = 10;
-	dist_sw.x_on_screen = dcs[1].x_on_screen = dcs[3].x_on_screen = 10+scale*EPC_XS+20;
+//	screen_imgs[0]->x_on_screen = screen_imgs[2]->x_on_screen = screen_imgs[4]->x_on_screen = 10;
+//	screen_imgs[1]->x_on_screen = screen_imgs[3]->x_on_screen = screen_imgs[5]->x_on_screen = 10+scale*EPC_XS+20;
 
-	mono.y_on_screen = dist_sw.y_on_screen = 10;
-	dcs[0].y_on_screen = dcs[1].y_on_screen = 10+scale*EPC_YS+70;
-	dcs[2].y_on_screen = dcs[3].y_on_screen = 10+2.0*(scale*EPC_YS+70);
-	mono.scale = dist_sw.scale = dcs[0].scale = dcs[1].scale = dcs[2].scale = dcs[3].scale = scale;
+//	mono.y_on_screen = dist_sw.y_on_screen = 10;
+//	dcs[0].y_on_screen = dcs[1].y_on_screen = 10+scale*EPC_YS+70;
+//	dcs[2].y_on_screen = dcs[3].y_on_screen = 10+2.0*(scale*EPC_YS+70);
+
+//	mono.scale = dist_sw.scale = dcs[0].scale = dcs[1].scale = dcs[2].scale = dcs[3].scale = scale;
 
 
 	for(int img_idx=0; img_idx < NUM_SCREEN_IMGS; img_idx++)
 	{
+		screen_imgs[img_idx]->x_on_screen = 10 + (img_idx%2)*(scale*EPC_XS+20);
+		screen_imgs[img_idx]->y_on_screen = 10 + (img_idx/2)*(scale*EPC_YS+70);
+		screen_imgs[img_idx]->scale = scale;
 		draw_screen_img(win, screen_imgs[img_idx]);
 	}
 }
@@ -1042,9 +1171,62 @@ int parse_uart_msg(uint8_t* buf, int msgid, int len)
 
 			if(msgid == 0x13)
 			{
+				if(!show_software_dist) break;
+
 				calc_dist();
 				dist_sw.analysis_func(dist_sw.data, &dist_sw.spatial_analysis);
 			}
+
+		}
+		break;
+
+		case 0x80:
+		{
+			if(show_software_dist) break;
+
+			screen_img_t *dest = &dist_sw;
+
+			int i = 0;
+			for(int yy=0; yy < 60; yy++)
+			{
+				for(int xx=0; xx < 160; xx++)
+				{
+					int val = ((uint16_t)buf[i+1])<<8 | ((uint16_t)buf[i]);
+					dest->data[yy*EPC_XS+xx] = val;
+					i+=2;
+				}
+			}
+
+			printf("Calc time = %.1f ms\n", (float)(((uint16_t)buf[i+1])<<8 | ((uint16_t)buf[i]))*0.1);
+			i+=2;
+
+			dest->analysis_func(dest->data, &dest->spatial_analysis);
+
+		}
+		break;
+
+		case 0x81:
+		{
+			if(show_software_dist) break;
+
+			use_ampl_img = true; // start using it if received once.
+
+			screen_img_t *dest = &ampl_sw;
+
+			int i = 0;
+			for(int yy=0; yy < 60; yy++)
+			{
+				for(int xx=0; xx < 160; xx++)
+				{
+					dest->data[yy*EPC_XS+xx] = buf[i];
+					i++;
+				}
+			}
+
+			dest->analysis_func(dest->data, &dest->spatial_analysis);
+
+			if(saving) save_analysis_line();
+
 
 		}
 		break;
@@ -1070,6 +1252,9 @@ void save_settings()
 	{
 		fwrite(offsets, sizeof(offsets), 1, f_save);
 		fwrite(&config, sizeof(config), 1, f_save);
+		fwrite(&blue_dist, sizeof(blue_dist), 1, f_save);
+		fwrite(&ampl_mask_lvl, sizeof(ampl_mask_lvl), 1, f_save);
+		fwrite(&at_points, sizeof(at_points), 1, f_save);
 		fclose(f_save);
 	}
 }
@@ -1081,12 +1266,22 @@ void restore_settings()
 	{
 		fread(offsets, sizeof(offsets), 1, f_save);
 		fread(&config, sizeof(config), 1, f_save);
+		fread(&blue_dist, sizeof(blue_dist), 1, f_save);
+		fread(&ampl_mask_lvl, sizeof(ampl_mask_lvl), 1, f_save);
+		fread(&at_points, sizeof(at_points), 1, f_save);
 		fclose(f_save);
 	}
 }
 
 int main(int argc, char** argv)
 {
+
+	csv = fopen("measurements.csv", "a");
+
+	if(!csv)
+	{
+		printf("Warn: couldn't open measurements.csv for write, cannot save measurements\n");
+	}
 
 	restore_settings();
 
@@ -1217,23 +1412,32 @@ int main(int argc, char** argv)
 					}
 					else
 					{
-						int t = ((float)config.dist_int_len/1.189207115);
+						//int t = ((float)config.dist_int_len/1.189207115); // 1/4 stops
+						int t = ((float)config.dist_int_len/1.090507733); // 1/8 stops
 						if(t < 10) t = 10;
 						else if(t > 16384) t = 16384;
 						config.dist_int_len = t;
 					}
 					send_hw_settings();
 				}
-				else if(event.key.code == sf::Keyboard::Right)
+				else if(event.key.code == sf::Keyboard::F11)
 				{
 					addj_offset((sf::Keyboard::isKeyPressed(sf::Keyboard::LShift) || sf::Keyboard::isKeyPressed(sf::Keyboard::RShift))?+0.02:+0.2);
 					save_settings();
 
 				}
-				else if(event.key.code == sf::Keyboard::Left)
+				else if(event.key.code == sf::Keyboard::F10)
 				{
 					addj_offset((sf::Keyboard::isKeyPressed(sf::Keyboard::LShift) || sf::Keyboard::isKeyPressed(sf::Keyboard::RShift))?-0.02:-0.2);
 					save_settings();
+				}
+				else if(event.key.code == sf::Keyboard::Right)
+				{
+					ampl_mask_lvl*=1.41;
+				}
+				else if(event.key.code == sf::Keyboard::Left)
+				{
+					ampl_mask_lvl/=1.41;
 				}
 				else if(event.key.code == sf::Keyboard::F1)
 				{
@@ -1290,6 +1494,39 @@ int main(int argc, char** argv)
 					else
 					{ if(config.pll_shift < 12) config.pll_shift++; }
 					send_hw_settings();
+				}
+				else if(event.key.code == sf::Keyboard::BackSpace)
+				{
+					at_points[sel_at_point][0] = EPC_XS/2;
+					at_points[sel_at_point][1] = EPC_YS/2;
+				}
+				else if(event.key.code == sf::Keyboard::F12)
+				{
+					if(show_software_dist)
+					{
+						show_software_dist = false;
+						strcpy(dist_sw.title, "Hardware distance");
+					}
+					else
+					{
+						show_software_dist = true;
+						strcpy(dist_sw.title, "Software distance");
+					}
+				}
+				else if(event.key.code == sf::Keyboard::F9)
+				{
+					if(!saving && csv)
+					{
+						save_idx++;
+						save_samples = 0;
+						saving = true;
+						save_analysis_header();
+					}
+					else
+					{
+						saving = false;
+						fprintf(csv, "\n\n");
+					}
 				}
 
 			}
@@ -1361,22 +1598,36 @@ int main(int argc, char** argv)
 		t.setCharacterSize(14);
 		t.setFillColor(sf::Color(255,255,255));
 
-		sprintf(buf, "bw_int_len=%5d dist_int_len=%5d clk_div=%d (%5.2fMHz) pll_shift=%2d(%5.2fm) dll_shift=%2d(~%5.2fm) blue_dist=%5.0f\n", 
+		sprintf(buf, "bw_int_len=%5d dist_int_len=%5d clk_div=%d (%5.2fMHz) pll_shift=%2d(%5.2fm) dll_shift=%2d(~%5.2fm) blue_dist=%5.0f offset=%6d  ampl_mask=%5.1f", 
 			config.bw_int_len, config.dist_int_len,
 			config.clk_div, 20.0/config.clk_div,
 			config.pll_shift, config.pll_shift*0.299792458*12.5,
 			config.dll_shift, config.dll_shift*0.299792458*2.0,
-			blue_dist);
+			blue_dist, config.offsets[config.clk_div], ampl_mask_lvl);
 		t.setString(buf);
 		t.setPosition(5, screen_y-17);
 		win.draw(t);
+
+
+		if(saving)
+		{
+			t.setCharacterSize(16);
+			t.setFillColor(sf::Color(255,0,0));
+
+			sprintf(buf, "saving with idx=%d, samples=%d", save_idx, save_samples);
+			t.setString(buf);
+			t.setPosition(5, screen_y-33);
+			win.draw(t);
+		}
 
 		win.display();
 
 
 	}
 
+	save_settings();
 
+	if(csv) fclose(csv);
 	return 0;
 }
 

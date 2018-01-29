@@ -21,3 +21,6 @@ ros_publisher: ros_publisher.cc
 tofdev: tofdev.cc
 	g++ -fpermissive -D_GLIBCXX_USE_CXX11_ABI=0 -Wall -c -o rn1client.o tofdev.cc
 	g++ -D_GLIBCXX_USE_CXX11_ABI=0 -o tofdev rn1client.o -L/usr/local/lib -lm -lsfml-graphics -lsfml-window -lsfml-system
+
+tof_table_gen: tof_table_gen.c
+	gcc -Wall tof_table_gen.c -o tof_table_gen -lm -std=c99
