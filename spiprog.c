@@ -129,7 +129,7 @@ int main(int argc, char** argv)
 	if(!(argc == 2 || argc == 3 || argc == 4))
 	{
 		printf("Usage: spiprog <reset_type> [firmware_filename] [v]\n");
-		printf("Reset types: r = s = soft reset.  h = hard reset\n");
+		printf("Reset types: r = s = soft reset.  h = hard reset.  l = stuck in infinite loop.  d = don't reset, stay in programmer.  R = reset if already in programmer\n");
 		printf("If firmware filename is supplied, it's flashed and verified.\n");
 		printf("If additional v is given, verbose mode is enabled.\n");
 		return -10;
@@ -138,6 +138,10 @@ int main(int argc, char** argv)
 
 	int reset_type = 1;
 	if(argv[1][0] == 'h') reset_type = 2;
+	if(argv[1][0] == 'l') reset_type = 55;
+	if(argv[1][0] == 'd') reset_type = 999;
+	if(argv[1][0] == 'R') reset_type = 9999;
+
 
 	if(argc == 4 && argv[3][0] == 'v')
 	{
@@ -149,22 +153,25 @@ int main(int argc, char** argv)
 	init_spi();
 
 
-	if(verbose) printf("Sending magic flasher entering sequence...\n");
-
+	if(reset_type != 9999)
 	{
-		uint32_t msg = 0x9876fedb;
-		struct spi_ioc_transfer xfer;
-		memset(&xfer, 0, sizeof(xfer)); // unused fields need to be initialized zero.
-		xfer.tx_buf = &msg;
-		xfer.rx_buf = NULL;
-		xfer.len = 4;
-		xfer.cs_change = 0;
+		if(verbose) printf("Sending magic flasher entering sequence...\n");
 
-		if(ioctl(spi_fd, SPI_IOC_MESSAGE(1), &xfer) < 0)
 		{
-			printf("ERROR: spi ioctl transfer operation failed: %d (%s)\n", errno, strerror(errno));
-			deinit_spi();
-			return -1;
+			uint32_t msg = 0x9876fedb;
+			struct spi_ioc_transfer xfer;
+			memset(&xfer, 0, sizeof(xfer)); // unused fields need to be initialized zero.
+			xfer.tx_buf = &msg;
+			xfer.rx_buf = NULL;
+			xfer.len = 4;
+			xfer.cs_change = 0;
+
+			if(ioctl(spi_fd, SPI_IOC_MESSAGE(1), &xfer) < 0)
+			{
+				printf("ERROR: spi ioctl transfer operation failed: %d (%s)\n", errno, strerror(errno));
+				deinit_spi();
+				return -1;
+			}
 		}
 	}
 
@@ -361,25 +368,30 @@ int main(int argc, char** argv)
 	// Do the reset:
 	SKIP_VERIFICATION:
 
-	printf("Resetting the device...\n");
-
+	if(reset_type != 999)
 	{
-		struct __attribute__((packed)) reset_cmd { uint32_t magic; uint8_t type;} reset_cmd;
-		reset_cmd.magic = 0xdead5678;
-		reset_cmd.type = reset_type;
+		printf("Resetting the device...\n");
 
-		struct spi_ioc_transfer xfer;
-		memset(&xfer, 0, sizeof(xfer));
-		xfer.tx_buf = &reset_cmd;
-		xfer.rx_buf = NULL;
-		xfer.len = 5;
-		xfer.cs_change = 0;
+		if(reset_type == 9999) reset_type = 1;
 
-		if(ioctl(spi_fd, SPI_IOC_MESSAGE(1), &xfer) < 0)
 		{
-			printf("ERROR: spi ioctl transfer operation failed: %d (%s)\n", errno, strerror(errno));
-			deinit_spi();
-			return -1;
+			struct __attribute__((packed)) reset_cmd { uint32_t magic; uint8_t type;} reset_cmd;
+			reset_cmd.magic = 0xdead5678;
+			reset_cmd.type = reset_type;
+
+			struct spi_ioc_transfer xfer;
+			memset(&xfer, 0, sizeof(xfer));
+			xfer.tx_buf = &reset_cmd;
+			xfer.rx_buf = NULL;
+			xfer.len = 5;
+			xfer.cs_change = 0;
+
+			if(ioctl(spi_fd, SPI_IOC_MESSAGE(1), &xfer) < 0)
+			{
+				printf("ERROR: spi ioctl transfer operation failed: %d (%s)\n", errno, strerror(errno));
+				deinit_spi();
+				return -1;
+			}
 		}
 	}
 
