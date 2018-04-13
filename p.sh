@@ -13,9 +13,9 @@
 motcona=1
 motconb=4
 
-tooldir="~/rn1-tools"
+tooldir="${HOME}/rn1-tools"
 
-lockfile="~/rn1-host/rn1host.lock"
+lockfile="${HOME}/rn1-host/rn1host.lock"
 
 logfile="${tooldir}/program_log.txt"
 
