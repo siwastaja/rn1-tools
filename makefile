@@ -6,6 +6,9 @@ lidar_comp_dev: lidar_comp_dev.c
 mcprog: mcprog.c
 	gcc -Wall mcprog.c -o mcprog
 
+spiprog: spiprog.c
+	gcc -o spiprog spiprog.c -std=c99
+
 prog: prog.c
 	gcc -Wall prog.c -o prog
 

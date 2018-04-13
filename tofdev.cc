@@ -163,6 +163,8 @@ typedef struct __attribute__((packed))
 	uint8_t pll_shift; // delay in 12.5 ns/step , 0-12
 	uint8_t dll_shift; // delay in approx 2ns/step, 0-49
 
+	uint8_t led_type;
+
 	int16_t offsets[7];
 
 } config_t;
@@ -173,7 +175,8 @@ config_t config =  // active configuration
 	.dist_int_len = 1000,
 	.clk_div = 1,
 	.pll_shift = 0,
-	.dll_shift = 0
+	.dll_shift = 0,
+	.led_type = 0
 };
 
 // Software calculation offsets:
@@ -830,6 +833,8 @@ void save_analysis_header()
 		blue_dist, config.offsets[config.clk_div], ampl_mask_lvl);
 
 
+/*
+	// for dist&ampl
 	for(int j=0; j<2; j++)
 	{
 		static const char names[2][5] = {"DIST", "AMPL"};
@@ -842,10 +847,26 @@ void save_analysis_header()
 			fprintf(csv, ";P%d;val;avg9;avg49;noise49", i);
 		}
 	}
-
+*/
+	// for 4dcs
+	for(int j=0; j<5; j++)
+	{
+		if(j<4)
+			fprintf(csv, ";DCS%d;nvalid;min;avg;max", j);
+		else
+			fprintf(csv, ";BG;nvalid;min;avg;max");
+		for(int i=0; i<N_AT_POINTS; i++)
+		{
+			if(at_points[i][0] < 0 || at_points[i][0] >= EPC_XS || at_points[i][1] < 0 || at_points[i][1] >= EPC_YS)
+				continue;
+			fprintf(csv, ";P%d;val;avg9;avg49;noise49", i);
+		}
+	}
 	fprintf(csv, "\n");
 }
 
+/*
+// For dist&ampl
 void save_analysis_line()
 {
 	if(!csv) return;
@@ -871,6 +892,37 @@ void save_analysis_line()
 	fprintf(csv, "\n");
 	save_samples++;
 }
+*/
+
+// For DCS0,1,2,3,BG
+void save_analysis_line()
+{
+	if(!csv) return;
+
+	for(int j=0; j<5; j++)
+	{
+		spatial_analysis_t *a;
+		if(j<4)
+		{
+			a = &dcs[j].spatial_analysis;
+			fprintf(csv, ";DCS%d;%d;%.0f;%.1f;%.0f", j, a->nvalid, a->min, a->avg, a->max);
+		}
+		else
+		{
+			a = &mono.spatial_analysis;
+			fprintf(csv, ";BG;%d;%.0f;%.1f;%.0f", a->nvalid, a->min, a->avg, a->max);
+		}
+
+		for(int i=0; i<N_AT_POINTS; i++)
+		{
+			if(at_points[i][0] < 0 || at_points[i][0] >= EPC_XS || at_points[i][1] < 0 || at_points[i][1] >= EPC_YS)
+				continue;
+			fprintf(csv, ";P%d;%.0f;%.1f;%.1f;%.1f", i, a->val_at[i], a->avg9_at[i], a->avg49_at[i], a->noise49_at[i]);
+		}
+	}
+	fprintf(csv, "\n");
+	save_samples++;
+}
 
 #define NUM_SCREEN_IMGS 6
 screen_img_t *screen_imgs[NUM_SCREEN_IMGS] =
@@ -878,7 +930,8 @@ screen_img_t *screen_imgs[NUM_SCREEN_IMGS] =
 	&mono,
 	&dist_sw,
 	&dcs[0],
-	&ampl_sw, //&dcs[1],
+	&ampl_sw,
+//	&dcs[1],
 	&dcs[2],
 	&dcs[3],
 };
@@ -1175,6 +1228,9 @@ int parse_uart_msg(uint8_t* buf, int msgid, int len)
 
 				calc_dist();
 				dist_sw.analysis_func(dist_sw.data, &dist_sw.spatial_analysis);
+
+				if(saving) save_analysis_line();
+
 			}
 
 		}
@@ -1225,7 +1281,7 @@ int parse_uart_msg(uint8_t* buf, int msgid, int len)
 
 			dest->analysis_func(dest->data, &dest->spatial_analysis);
 
-			if(saving) save_analysis_line();
+//			if(saving) save_analysis_line();
 
 
 		}
@@ -1370,6 +1426,31 @@ int main(int argc, char** argv)
 			{
 				if(event.key.code == sf::Keyboard::X)
 					mir_x = !mir_x;
+				else if(event.key.code == sf::Keyboard::A)
+				{
+					config.dist_int_len = 20;
+					send_hw_settings();
+				}
+				else if(event.key.code == sf::Keyboard::S)
+				{
+					config.dist_int_len = 80;
+					send_hw_settings();
+				}
+				else if(event.key.code == sf::Keyboard::D)
+				{
+					config.dist_int_len = 320;
+					send_hw_settings();
+				}
+				else if(event.key.code == sf::Keyboard::F)
+				{
+					config.dist_int_len = 1280;
+					send_hw_settings();
+				}
+				else if(event.key.code == sf::Keyboard::G)
+				{
+					config.dist_int_len = 5120;
+					send_hw_settings();
+				}
 				else if(event.key.code == sf::Keyboard::Y)
 					mir_y = !mir_y;
 				else if(event.key.code == sf::Keyboard::R)
@@ -1388,14 +1469,14 @@ int main(int argc, char** argv)
 					if(sf::Keyboard::isKeyPressed(sf::Keyboard::LShift) || sf::Keyboard::isKeyPressed(sf::Keyboard::RShift) )
 					{
 						int t = ((float)config.bw_int_len*1.189207115);
-						if(t < 10) t = 10;
+						if(t < 20) t = 20;
 						else if(t > 16384) t = 16384;
 						config.bw_int_len = t;
 					}
 					else
 					{
-						int t = ((float)config.dist_int_len*1.189207115);
-						if(t < 10) t = 10;
+						int t = ((float)config.dist_int_len*1.090507733);
+						if(t < 20) t = 20;
 						else if(t > 16384) t = 16384;
 						config.dist_int_len = t;
 					}
@@ -1406,7 +1487,7 @@ int main(int argc, char** argv)
 					if(sf::Keyboard::isKeyPressed(sf::Keyboard::LShift) || sf::Keyboard::isKeyPressed(sf::Keyboard::RShift) )
 					{
 						int t = ((float)config.bw_int_len/1.189207115);
-						if(t < 10) t = 10;
+						if(t < 20) t = 20;
 						else if(t > 16384) t = 16384;
 						config.bw_int_len = t;
 					}
@@ -1414,7 +1495,7 @@ int main(int argc, char** argv)
 					{
 						//int t = ((float)config.dist_int_len/1.189207115); // 1/4 stops
 						int t = ((float)config.dist_int_len/1.090507733); // 1/8 stops
-						if(t < 10) t = 10;
+						if(t < 20) t = 20;
 						else if(t > 16384) t = 16384;
 						config.dist_int_len = t;
 					}
@@ -1464,6 +1545,12 @@ int main(int argc, char** argv)
 					config.clk_div = 6;
 					send_hw_settings();
 				}
+				else if(event.key.code == sf::Keyboard::L)
+				{
+					config.led_type = config.led_type?0:1;
+					send_hw_settings();
+				}
+
 				else if(event.key.code == sf::Keyboard::PageUp)
 				{
 					if(sf::Keyboard::isKeyPressed(sf::Keyboard::LShift) || sf::Keyboard::isKeyPressed(sf::Keyboard::RShift) )
@@ -1598,12 +1685,12 @@ int main(int argc, char** argv)
 		t.setCharacterSize(14);
 		t.setFillColor(sf::Color(255,255,255));
 
-		sprintf(buf, "bw_int_len=%5d dist_int_len=%5d clk_div=%d (%5.2fMHz) pll_shift=%2d(%5.2fm) dll_shift=%2d(~%5.2fm) blue_dist=%5.0f offset=%6d  ampl_mask=%5.1f", 
+		sprintf(buf, "bw_int_len=%5d dist_int_len=%5d clk_div=%d (%5.2fMHz) pll_shift=%2d(%5.2fm) dll_shift=%2d(~%5.2fm) blue_dist=%5.0f offset=%6d  ampl_mask=%5.1f,  led=%s", 
 			config.bw_int_len, config.dist_int_len,
 			config.clk_div, 20.0/config.clk_div,
 			config.pll_shift, config.pll_shift*0.299792458*12.5,
 			config.dll_shift, config.dll_shift*0.299792458*2.0,
-			blue_dist, config.offsets[config.clk_div], ampl_mask_lvl);
+			blue_dist, config.offsets[config.clk_div], ampl_mask_lvl, config.led_type?"NARROW":"wide");
 		t.setString(buf);
 		t.setPosition(5, screen_y-17);
 		win.draw(t);

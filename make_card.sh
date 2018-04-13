@@ -16,9 +16,10 @@ set -x
 sudo umount /dev/mmcblk0p1
 sudo umount /dev/mmcblk0p2
 set -e
-sudo dd bs=1M if=raspbian.img of=/dev/mmcblk0 conv=fsync
+sudo dd bs=4M if=raspbian.img of=/dev/mmcblk0 conv=fsync
 sudo sync
 sleep 1
+sudo partprobe /dev/mmcblk0
 set +e
 sudo mkdir /mnt/tmpmnt_boot
 sudo mkdir /mnt/tmpmnt_system
@@ -31,6 +32,7 @@ echo "network={" >> /mnt/tmpmnt_system/etc/wpa_supplicant/wpa_supplicant.conf
 echo "  ssid=\"pulu\"" >> /mnt/tmpmnt_system/etc/wpa_supplicant/wpa_supplicant.conf
 echo "  psk=\"pulupulu\"" >> /mnt/tmpmnt_system/etc/wpa_supplicant/wpa_supplicant.conf
 echo "}" >> /mnt/tmpmnt_system/etc/wpa_supplicant/wpa_supplicant.conf
+echo $1 > /mnt/tmpmnt_system/etc/hostname
 touch /mnt/tmpmnt_boot/ssh
 cp install.sh /mnt/tmpmnt_system/home/pi/
 chmod 777 /mnt/tmpmnt_system/home/pi/install.sh
