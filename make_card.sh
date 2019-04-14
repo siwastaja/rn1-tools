@@ -26,16 +26,13 @@ sudo mkdir /mnt/tmpmnt_system
 set -e
 sudo mount /dev/mmcblk0p1 /mnt/tmpmnt_boot
 sudo mount /dev/mmcblk0p2 /mnt/tmpmnt_system
-cp raspi_example_config.txt /mnt/tmpmnt_boot/config.txt
-cp raspi_rclocal_example /mnt/tmpmnt_system/etc/rc.local
-echo "network={" >> /mnt/tmpmnt_system/etc/wpa_supplicant/wpa_supplicant.conf
-echo "  ssid=\"pulu\"" >> /mnt/tmpmnt_system/etc/wpa_supplicant/wpa_supplicant.conf
-echo "  psk=\"pulupulu\"" >> /mnt/tmpmnt_system/etc/wpa_supplicant/wpa_supplicant.conf
-echo "}" >> /mnt/tmpmnt_system/etc/wpa_supplicant/wpa_supplicant.conf
-echo $1 > /mnt/tmpmnt_system/etc/hostname
-touch /mnt/tmpmnt_boot/ssh
-cp install.sh /mnt/tmpmnt_system/home/pi/
-chmod 777 /mnt/tmpmnt_system/home/pi/install.sh
+sudo cp raspi_example_config.txt /mnt/tmpmnt_boot/config.txt
+sudo cp raspi_rclocal_example /mnt/tmpmnt_system/etc/rc.local
+sudo cp raspi_wpasupplicant_example /mnt/tmpmnt_system/etc/wpa_supplicant/wpa_supplicant.conf
+sudo echo $1 > /mnt/tmpmnt_system/etc/hostname
+sudo touch /mnt/tmpmnt_boot/ssh
+sudo cp install.sh /mnt/tmpmnt_system/home/pi/
+sudo chmod 777 /mnt/tmpmnt_system/home/pi/install.sh
 sudo umount /dev/mmcblk0p1
 sudo umount /dev/mmcblk0p2
 sudo rmdir /mnt/tmpmnt_boot

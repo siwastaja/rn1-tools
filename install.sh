@@ -16,6 +16,7 @@ adduser pulu sudo
 
 systemctl enable ssh
 
+apt-get update
 apt-get -y install git
 cd /home/pulu
 sudo -u pulu git clone https://github.com/siwastaja/rn1-host
